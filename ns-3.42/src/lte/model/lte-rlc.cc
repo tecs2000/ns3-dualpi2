@@ -157,6 +157,9 @@ LteRlc::DoSetCqi(uint8_t cqi)
 {
     NS_LOG_FUNCTION(this << (uint32_t)cqi);
     m_cqi = cqi;
+
+    if(m_rlcSapUser)
+        m_rlcSapUser->ReceiveRlcCQI(cqi);
 }
 
 void

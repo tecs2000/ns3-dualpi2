@@ -1,133 +1,119 @@
-/*
- * Copyright (c) 2017 Jadavpur University, India
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation;
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
- * Author: Manoj Kumar Rana <manoj24.rana@gmail.com>
- */
-
 #include "ns3/applications-module.h"
+#include "ns3/config-store.h"
 #include "ns3/core-module.h"
-#include "ns3/epc-helper.h"
 #include "ns3/internet-module.h"
+#include "ns3/ipv4-flow-classifier.h"
 #include "ns3/ipv4-global-routing-helper.h"
-#include "ns3/ipv6-static-routing.h"
 #include "ns3/lte-helper.h"
 #include "ns3/lte-module.h"
 #include "ns3/mobility-module.h"
+#include "ns3/netanim-module.h"
 #include "ns3/network-module.h"
-#include "ns3/point-to-point-helper.h"
+#include <ns3/flow-monitor-helper.h>
+#include <ns3/flow-monitor.h>
+#include <ns3/point-to-point-helper.h>
+
+#include <iostream>
+#include <random>
+
+#define CVM ConstantVelocityMobilityModel
 
 using namespace ns3;
 
-/**
- * Sample simulation script for LTE+EPC. It instantiates several eNodeB,
- * attaches one UE per eNodeB starts a flow for each UE to  and from a remote host.
- * It configures IPv6 addresses for UEs by setting the 48 bit prefix attribute in epc helper
- */
+NodeContainer ues;
+NodeContainer eNBs;
+NodeContainer remoteHosts;
+Ptr<Node> pgw;
+Ptr<Node> sgw;
+Ptr<Node> remoteHost;
 
-NS_LOG_COMPONENT_DEFINE("EpcFirstExampleForIpv6");
+// cmd line variables
+int nUE=5;
+int aqm = 0;
+int baseDistance=2500;
+int baseDelay = 50; // ms
+int printNetStats = 0;
+
+// enb related variables
+int nENBs;
+int maxDistance = baseDistance + 2500; // radius
+double enbX = 2500.0;
+double enbY = 2500.0;
+
+int nRemoteHosts;
+int duration = 20;
+
+Ptr<UniformRandomVariable> uRand = CreateObject<UniformRandomVariable>();
+
+Ptr<LteHelper> lte;
+Ptr<PointToPointEpcHelper> core;
+
+void setMobility();
+void createRouteUEsRemoteHost();
+void ScheduleCheckCourse(Ptr<MobilityModel> mobility);
+void CheckCourse(std::string context, Ptr<MobilityModel> mobility);
+void printStats(Ptr<FlowMonitor> monitor,
+                FlowMonitorHelper& flowmon,
+                Ipv4InterfaceContainer& uesIPs,
+                Ipv4InterfaceContainer& internetIPs);
+
+NS_LOG_COMPONENT_DEFINE("LtePDCPCqi");
 
 int
 main(int argc, char* argv[])
 {
-    CommandLine cmd(__FILE__);
+    LogComponentEnable("LtePdcp", LOG_LEVEL_FUNCTION);
+    LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_INFO);
+    LogComponentEnable("UdpEchoClientApplication", LOG_LEVEL_INFO);
+
+    CommandLine cmd;
+    cmd.AddValue("nUE", "n of user equipment", nUE);
+    cmd.AddValue("stats", "print network stats", printNetStats);
+    cmd.AddValue("base-dist", "the minimal distance an UE can be placed from the eNB", baseDistance);
+    cmd.AddValue("base-delay", "the base delay between the core and the remote host", baseDelay);
+
     cmd.Parse(argc, argv);
 
-    Ptr<LteHelper> lteHelper = CreateObject<LteHelper>();
-    Ptr<PointToPointEpcHelper> epcHelper = CreateObject<PointToPointEpcHelper>();
-    lteHelper->SetEpcHelper(epcHelper);
+    nENBs = 1;
+    nRemoteHosts = 1;
 
-    Ptr<Node> pgw = epcHelper->GetPgwNode();
+    ues.Create(nUE);
+    eNBs.Create(nENBs);
+    remoteHosts.Create(nRemoteHosts);
 
-    // Create a single RemoteHost
-    NodeContainer remoteHostContainer;
-    remoteHostContainer.Create(1);
-    Ptr<Node> remoteHost = remoteHostContainer.Get(0);
+    lte = CreateObject<LteHelper>(); // uses FriisPropagationLossModel as default
+    core = CreateObject<PointToPointEpcHelper>();
+
+    lte->SetEpcHelper(core);
+
+    pgw = core->GetPgwNode();
+    sgw = core->GetSgwNode();
+    remoteHost = remoteHosts.Get(0);
+
+    setMobility();
+
+    NetDeviceContainer eNBsDevs = lte->InstallEnbDevice(eNBs);
+    NetDeviceContainer UEsDevs = lte->InstallUeDevice(ues);
+
+    PointToPointHelper p2p;
+    p2p.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
+    p2p.SetChannelAttribute("Delay", TimeValue(MilliSeconds(baseDelay)));
+
+    NetDeviceContainer internetDevices = p2p.Install(pgw, remoteHost);
+
     InternetStackHelper internet;
-    internet.Install(remoteHostContainer);
+    internet.Install(remoteHosts);
+    internet.Install(ues);
 
-    // Create the Internet
-    PointToPointHelper p2ph;
-    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2ph.SetDeviceAttribute("Mtu", UintegerValue(1500));
-    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.010)));
-    NetDeviceContainer internetDevices = p2ph.Install(pgw, remoteHost);
+    Ipv4AddressHelper ipv4h;
+    ipv4h.SetBase("1.0.0.0", "255.0.0.0");
+    Ipv4InterfaceContainer internetIPs = ipv4h.Assign(internetDevices);
 
-    NodeContainer ueNodes;
-    NodeContainer enbNodes;
-    enbNodes.Create(1);
-    ueNodes.Create(2);
+    Ipv4InterfaceContainer uesIPs = core->AssignUeIpv4Address(UEsDevs);
 
-    // Install Mobility Model
-    Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator>();
-    for (uint16_t i = 0; i < 2; i++)
-    {
-        positionAlloc->Add(Vector(60.0 * i, 0, 0));
-    }
-    MobilityHelper mobility;
-    mobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-    mobility.SetPositionAllocator(positionAlloc);
-    mobility.Install(enbNodes);
-    mobility.Install(ueNodes);
+    lte->Attach(UEsDevs, eNBsDevs.Get(0));
 
-    // Install the IP stack on the UEs
-    internet.Install(ueNodes);
-
-    // Install LTE Devices to the nodes
-    NetDeviceContainer enbLteDevs = lteHelper->InstallEnbDevice(enbNodes);
-    NetDeviceContainer ueLteDevs1 = lteHelper->InstallUeDevice(NodeContainer(ueNodes.Get(0)));
-    NetDeviceContainer ueLteDevs2 = lteHelper->InstallUeDevice(NodeContainer(ueNodes.Get(1)));
-
-    Ipv6AddressHelper ipv6h;
-    ipv6h.SetBase(Ipv6Address("6001:db80::"), Ipv6Prefix(64));
-    Ipv6InterfaceContainer internetIpIfaces = ipv6h.Assign(internetDevices);
-
-    internetIpIfaces.SetForwarding(0, true);
-    internetIpIfaces.SetDefaultRouteInAllNodes(0);
-
-    Ipv6InterfaceContainer ueIpIface;
-
-    // Assign IP address to the first UE
-    ueIpIface = epcHelper->AssignUeIpv6Address(NetDeviceContainer(ueLteDevs1));
-
-    Ipv6StaticRoutingHelper ipv6RoutingHelper;
-    Ptr<Ipv6StaticRouting> remoteHostStaticRouting =
-        ipv6RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv6>());
-    remoteHostStaticRouting
-        ->AddNetworkRouteTo("7777:f00d::", Ipv6Prefix(64), internetIpIfaces.GetAddress(0, 1), 1, 0);
-
-    // Assign IP address to the second UE
-    ueIpIface.Add(epcHelper->AssignUeIpv6Address(NetDeviceContainer(ueLteDevs2)));
-
-    for (uint32_t u = 0; u < ueNodes.GetN(); ++u)
-    {
-        Ptr<Node> ueNode = ueNodes.Get(u);
-        // Set the default gateway for the UEs
-        Ptr<Ipv6StaticRouting> ueStaticRouting =
-            ipv6RoutingHelper.GetStaticRouting(ueNode->GetObject<Ipv6>());
-        ueStaticRouting->SetDefaultRoute(epcHelper->GetUeDefaultGatewayAddress6(), 1);
-    }
-
-    // Attach one UE per eNodeB
-    lteHelper->Attach(ueLteDevs1.Get(0), enbLteDevs.Get(0));
-    lteHelper->Attach(ueLteDevs2.Get(0), enbLteDevs.Get(0));
-
-    // interface 0 is localhost, 1 is the p2p device
-    Ipv6Address remoteHostAddr = internetIpIfaces.GetAddress(1, 1);
-
-    // Install and start applications on UEs and remote host
+    createRouteUEsRemoteHost();
 
     UdpEchoServerHelper echoServer(9);
 
@@ -136,33 +122,187 @@ main(int argc, char* argv[])
     serverApps.Start(Seconds(4.0));
     serverApps.Stop(Seconds(20.0));
 
-    UdpEchoClientHelper echoClient1(remoteHostAddr, 9);
-    UdpEchoClientHelper echoClient2(remoteHostAddr, 9);
+    Ipv4Address remoteHostAddr = internetIPs.GetAddress(1, 0);
 
-    echoClient1.SetAttribute("MaxPackets", UintegerValue(1000));
-    echoClient1.SetAttribute("Interval", TimeValue(Seconds(1.0)));
-    echoClient1.SetAttribute("PacketSize", UintegerValue(1024));
+    UdpEchoClientHelper echoClient(remoteHostAddr, 9);
 
-    echoClient2.SetAttribute("MaxPackets", UintegerValue(1000));
-    echoClient2.SetAttribute("Interval", TimeValue(Seconds(1.0)));
-    echoClient2.SetAttribute("PacketSize", UintegerValue(1024));
+    echoClient.SetAttribute("MaxPackets", UintegerValue(1000));
+    echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
+    echoClient.SetAttribute("PacketSize", UintegerValue(1024));
 
-    ApplicationContainer clientApps1 = echoClient1.Install(ueNodes.Get(0));
-    ApplicationContainer clientApps2 = echoClient2.Install(ueNodes.Get(1));
+    ApplicationContainer clientApps = echoClient.Install(ues.Get(0));
 
-    clientApps1.Start(Seconds(4.0));
-    clientApps1.Stop(Seconds(14.0));
+    clientApps.Start(Seconds(4.0));
+    clientApps.Stop(Seconds(14.0));
 
-    clientApps2.Start(Seconds(4.5));
-    clientApps2.Stop(Seconds(14.5));
+    FlowMonitorHelper flowmon;
+    Ptr<FlowMonitor> monitor = flowmon.InstallAll();
 
-    // LogComponentEnable("UdpEchoClientApplication", LOG_LEVEL_ALL);
-    // LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_ALL);
-    LogComponentEnable("LteRlc", LOG_LEVEL_FUNCTION);
-
-    Simulator::Stop(Seconds(20));
+    Simulator::Stop(Seconds(duration));
     Simulator::Run();
 
+    if (printNetStats)
+        printStats(monitor, flowmon, uesIPs, internetIPs);
+
     Simulator::Destroy();
+
     return 0;
+}
+
+void
+printStats(Ptr<FlowMonitor> monitor,
+           FlowMonitorHelper& flowmon,
+           Ipv4InterfaceContainer& uesIPs,
+           Ipv4InterfaceContainer& internetIPs)
+{
+    NS_LOG_INFO("PGW IPv4 Address: " << internetIPs.GetAddress(0));
+    NS_LOG_INFO("RemoteHost IPv4 Address: " << internetIPs.GetAddress(1));
+    NS_LOG_INFO("Default Gateway IPv4 Address: " << core->GetUeDefaultGatewayAddress());
+
+    std::vector<Ipv4Address> ues_ips;
+    for (int u = 0; u < nUE; ++u)
+    {
+        ues_ips.push_back(uesIPs.GetAddress(u));
+        NS_LOG_INFO("UE " << u << " ipaddr: " << uesIPs.GetAddress(u));
+    }
+
+    monitor->CheckForLostPackets();
+
+    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowmon.GetClassifier());
+    FlowMonitor::FlowStatsContainer stats = monitor->GetFlowStats();
+    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
+         i != stats.end();
+         ++i)
+    {
+        Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
+
+        std::vector<Ipv4Address>::iterator it =
+            std::find(ues_ips.begin(), ues_ips.end(), t.sourceAddress);
+
+        // Plot only data related to the UE
+        if (it != ues_ips.end())
+        {
+            std::cout << "Flow ID " << i->first << " (" << t.sourceAddress << " -> "
+                      << t.destinationAddress << ")\n";
+
+            double timeTaken =
+                i->second.timeLastTxPacket.GetSeconds() - i->second.timeFirstTxPacket.GetSeconds();
+            double Throughput = i->second.txBytes * 8.0 / timeTaken / 1024 / 1024;
+
+            std::cout << "  Throughput (Mbps): " << Throughput << "\n";
+
+            std::cout << "  Tx Packets: " << i->second.txPackets << "\n";
+            std::cout << "  Tx Bytes:   " << i->second.txBytes << "\n";
+            std::cout << "  Rx Packets: " << i->second.rxPackets << "\n";
+            std::cout << "  Rx Bytes: " << i->second.rxBytes << "\n";
+            std::cout << "  Average Rx Packet Size: " << i->second.rxBytes / i->second.rxPackets
+                      << "\n";
+            std::cout << "  Average Tx Packet Size: " << i->second.txBytes / i->second.txPackets
+                      << "\n";
+            std::cout << "  Average Delay:  "
+                      << i->second.delaySum.GetSeconds() / i->second.rxPackets << " s\n";
+        }
+    }
+}
+
+void
+setMobility()
+{
+    uRand->SetAttribute("Min", DoubleValue(50.0));
+    uRand->SetAttribute("Max", DoubleValue(100.0));
+
+    MobilityHelper nodesMobility;
+    MobilityHelper uesMobility;
+
+    Ptr<ListPositionAllocator> PositionAlloc = CreateObject<ListPositionAllocator>();
+
+    PositionAlloc->Add(Vector(4000.0, 1000.0, 0.0)); // Remote Host
+    PositionAlloc->Add(Vector(enbX, enbY, 0.0));     // eNB
+    PositionAlloc->Add(Vector(2500.0, 1000.0, 0.0)); // PGW
+    PositionAlloc->Add(Vector(2500, 1500.0, 0.0));   // SGW
+    nodesMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
+    nodesMobility.SetPositionAllocator(PositionAlloc);
+    nodesMobility.Install(remoteHosts);
+    nodesMobility.Install(eNBs);
+    nodesMobility.Install(pgw);
+    nodesMobility.Install(sgw);
+
+    // UEs - Set position allocator for UEs relative to the eNB
+    uesMobility.SetPositionAllocator("ns3::RandomDiscPositionAllocator",
+                                     "X",
+                                     StringValue("2500.0"),
+                                     "Y",
+                                     StringValue("2500.0"),
+                                     "Rho",
+                                     StringValue("ns3::UniformRandomVariable[Min=" + std::to_string(baseDistance) +"|Max="+ std::to_string(maxDistance) +"]"));
+    uesMobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
+    uesMobility.Install(ues);
+
+    for (int i = 0; i < nUE; i++)
+    {
+        Ptr<CVM> mobility = ues.Get(i)->GetObject<CVM>();
+
+        double newSpeed = uRand->GetValue();
+        double newDirection = uRand->GetValue(0.0, 2 * M_PI);
+
+        double x = newSpeed * cos(newDirection);
+        double y = newSpeed * sin(newDirection);
+
+        mobility->SetVelocity(Vector(x, y, 0.0));
+
+        ScheduleCheckCourse(mobility);
+    }
+}
+
+/**
+ * Schedule next course check
+ */
+void
+ScheduleCheckCourse(Ptr<MobilityModel> mobility)
+{
+    Simulator::Schedule(Seconds(1.0), &CheckCourse, "", mobility);
+}
+
+/**
+ * Check if the UE is outside the cell range or closer to the eNB than 2500m.
+ * If so, generate a new speed and direction to UE, and schedule a new check.
+ */
+void
+CheckCourse(std::string context, Ptr<MobilityModel> mobility)
+{
+    Vector pos = mobility->GetPosition();
+    Vector vel = mobility->GetVelocity();
+
+    double ueX = pos.x;
+    double ueY = pos.y;
+
+    double distance = std::sqrt(std::pow(ueX - enbX, 2) + std::pow(ueY - enbY, 2));
+
+    if (distance > maxDistance || distance < baseDistance)
+    {
+        // Reflect the velocity components to reverse direction
+        vel.x = -vel.x;
+        vel.y = -vel.y;
+
+        NS_LOG_INFO("Adjusted UE direction to opposite");
+    }
+
+    ScheduleCheckCourse(mobility);
+}
+
+void
+createRouteUEsRemoteHost()
+{
+    Ipv4StaticRoutingHelper ipv4RoutingHelper;
+    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
+        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
+    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+
+    for (uint32_t u = 0; u < ues.GetN(); ++u)
+    {
+        Ptr<Node> ueNode = ues.Get(u);
+        Ptr<Ipv4StaticRouting> ueStaticRouting =
+            ipv4RoutingHelper.GetStaticRouting(ueNode->GetObject<Ipv4>());
+        ueStaticRouting->SetDefaultRoute(core->GetUeDefaultGatewayAddress(), 1);
+    }
 }
