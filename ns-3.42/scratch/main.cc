@@ -130,7 +130,7 @@ main(int argc, char* argv[])
     echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
     echoClient.SetAttribute("PacketSize", UintegerValue(1024));
 
-    ApplicationContainer clientApps = echoClient.Install(ues.Get(0));
+    ApplicationContainer clientApps = echoClient.Install(ues);
 
     clientApps.Start(Seconds(4.0));
     clientApps.Stop(Seconds(14.0));
