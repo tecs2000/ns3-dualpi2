@@ -142,10 +142,17 @@ class LtePdcp : public Object // SimpleRefCount<LtePdcp>
                                         const uint64_t delay);
 
   protected:
+    // Interface provided to upper RRC entity
     /**
-     * Interface provided to upper RRC entity
-     *
-     * \param params the TransmitPdcpSduParameters
+     * This method is called by the RRC (Radio Resource Control) layer to transmit an RRC-PDU 
+     * (Protocol Data Unit) to the PDCP (Packet Data Convergence Protocol) layer.
+     * Upon receipt by the PDCP layer, the RRC-PDU is referred to as a PDCP-SDU (Service Data Unit).
+     * 
+     * @param params Parameters specifying the PDCP-SDU details, encapsulated by the 
+     *               LtePdcpSapProvider::TransmitPdcpSduParameters structure.
+     * 
+     * This function enables the handoff of control information from the RRC to the PDCP, 
+     * facilitating reliable data transmission within the LTE protocol stack.
      */
     virtual void DoTransmitPdcpSdu(LtePdcpSapProvider::TransmitPdcpSduParameters params);
 
