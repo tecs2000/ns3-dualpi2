@@ -186,15 +186,17 @@ DualQCoupledPiSquareQueueDiscTestCase::RunPiSquareTest (StringValue mode)
   Ptr<QueueDiscItem> item;
 
   item = queue->Dequeue ();
-  NS_TEST_EXPECT_MSG_EQ ((item), true, "I want to remove the first packet");
+  bool status = (item != nullptr) ? true : false ;
+  
+  NS_TEST_EXPECT_MSG_EQ (status, true, "I want to remove the first packet");
   NS_TEST_EXPECT_MSG_EQ (queue->GetQueueSize (), 7 * modeSize, "There should be seven packets in there");
 
   item = queue->Dequeue ();
-  NS_TEST_EXPECT_MSG_EQ ((item), true, "I want to remove the second packet");
+  NS_TEST_EXPECT_MSG_EQ (status, true, "I want to remove the second packet");
   NS_TEST_EXPECT_MSG_EQ (queue->GetQueueSize (), 6 * modeSize, "There should be six packet in there");
 
   item = queue->Dequeue ();
-  NS_TEST_EXPECT_MSG_EQ ((item), true, "I want to remove the third packet");
+  NS_TEST_EXPECT_MSG_EQ (status, true, "I want to remove the third packet");
   NS_TEST_EXPECT_MSG_EQ (queue->GetQueueSize (), 5 * modeSize, "There should be five packets in there");
 
   item = queue->Dequeue ();
@@ -361,8 +363,8 @@ static class DualQCoupledPiSquareQueueDiscTestSuite : public TestSuite
 {
 public:
   DualQCoupledPiSquareQueueDiscTestSuite ()
-    : TestSuite ("dual-q-coupled-pi-square-queue-disc", UNIT)
+    : TestSuite ("dual-q-coupled-pi-square-queue-disc", Type::UNIT)
   {
-    AddTestCase (new DualQCoupledPiSquareQueueDiscTestCase (), TestCase::QUICK);
+    AddTestCase (new DualQCoupledPiSquareQueueDiscTestCase (), Duration::QUICK);
   }
 } g_DualQCoupledPiSquareQueueTestSuite;
