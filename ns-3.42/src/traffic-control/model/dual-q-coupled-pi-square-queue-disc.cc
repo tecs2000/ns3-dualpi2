@@ -514,30 +514,29 @@ DualQCoupledPiSquareQueueDisc::CheckConfig (void)
       NS_LOG_ERROR ("DualQCoupledPiSquareQueueDisc needs 2 internal queue");
       return false;
     }
-//  TODO - Check if the mode of the internal queues match the mode of the DualQCoupledPiSquareQueueDisc
-  if ((GetInternalQueue (0)->GetMode () == QueueBase::QUEUE_MODE_PACKETS && m_mode == QUEUE_DISC_MODE_BYTES)
-      || (GetInternalQueue (0)->GetMode () == QueueBase::QUEUE_MODE_BYTES && m_mode == QUEUE_DISC_MODE_PACKETS))
+  if ((GetInternalQueue (0)->GetCurrentSize ().GetUnit() == QueueSizeUnit::PACKETS && m_mode == QUEUE_DISC_MODE_BYTES)
+      || (GetInternalQueue (0)->GetCurrentSize ().GetUnit() == QueueSizeUnit::BYTES && m_mode == QUEUE_DISC_MODE_PACKETS))
     {
       NS_LOG_ERROR ("The mode provided for Classic traffic queue does not match the mode set on the DualQCoupledPiSquareQueueDisc");
       return false;
     }
 
-  if ((GetInternalQueue (1)->GetMode () == QueueBase::QUEUE_MODE_PACKETS && m_mode == QUEUE_DISC_MODE_BYTES)
-      || (GetInternalQueue (1)->GetMode () == QueueBase::QUEUE_MODE_BYTES && m_mode == QUEUE_DISC_MODE_PACKETS))
+  if ((GetInternalQueue (1)->GetCurrentSize ().GetUnit() == QueueSizeUnit::PACKETS && m_mode == QUEUE_DISC_MODE_BYTES)
+      || (GetInternalQueue (1)->GetCurrentSize ().GetUnit() == QueueSizeUnit::BYTES && m_mode == QUEUE_DISC_MODE_PACKETS))
     {
       NS_LOG_ERROR ("The mode provided for L4S traffic queue does not match the mode set on the DualQCoupledPiSquareQueueDisc");
       return false;
     }
 
-  if ((m_mode ==  QUEUE_DISC_MODE_PACKETS && GetInternalQueue (0)->GetMaxPackets () < m_queueLimit)
-      || (m_mode ==  QUEUE_DISC_MODE_BYTES && GetInternalQueue (0)->GetMaxBytes () < m_queueLimit))
+  if ((m_mode ==  QUEUE_DISC_MODE_PACKETS && GetInternalQueue (0)->GetMaxSize ().GetValue() < m_queueLimit)
+      || (m_mode ==  QUEUE_DISC_MODE_BYTES && GetInternalQueue (0)->GetMaxSize ().GetValue() < m_queueLimit))
     {
       NS_LOG_ERROR ("The size of the internal Classic traffic queue is less than the queue disc limit");
       return false;
     }
 
-  if ((m_mode ==  QUEUE_DISC_MODE_PACKETS && GetInternalQueue (1)->GetMaxPackets () < m_queueLimit)
-      || (m_mode ==  QUEUE_DISC_MODE_BYTES && GetInternalQueue (1)->GetMaxBytes () < m_queueLimit))
+  if ((m_mode ==  QUEUE_DISC_MODE_PACKETS && GetInternalQueue (1)->GetMaxSize ().GetValue() < m_queueLimit)
+      || (m_mode ==  QUEUE_DISC_MODE_BYTES && GetInternalQueue (1)->GetMaxSize ().GetValue() < m_queueLimit))
     {
       NS_LOG_ERROR ("The size of the internal L4S traffic queue is less than the queue disc limit");
       return false;
