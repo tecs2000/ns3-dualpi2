@@ -152,4 +152,14 @@ QueueDiscItem::IsL4S (void)
   return false;
 }
 
-} // namespace ns3
+bool QueueDiscItem::operator==(const QueueDiscItem &other)
+{
+    return (this->GetAddress() == other.GetAddress() &&
+            this->GetProtocol() == other.GetProtocol() &&
+            this->GetTxQueueIndex() == other.GetTxQueueIndex() &&
+            this->GetTimeStamp() == other.GetTimeStamp() &&
+            this->GetPacket() == other.GetPacket());
+}
+
+}
+// namespace ns3

@@ -147,6 +147,8 @@ class QueueDiscItem : public QueueItem
     QueueDiscItem(const QueueDiscItem&) = delete;
     QueueDiscItem& operator=(const QueueDiscItem&) = delete;
 
+    bool operator==(const QueueDiscItem&);
+
     /**
      * \brief Get the MAC address included in this item
      * \return the MAC address included in this item.
