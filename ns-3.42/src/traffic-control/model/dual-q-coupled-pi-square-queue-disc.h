@@ -40,6 +40,26 @@ namespace ns3 {
 class TraceContainer;
 class UniformRandomVariable;
 
+class DualQueueL4SQueueDiscItem : public QueueDiscItem
+{
+public:
+  DualQueueL4SQueueDiscItem (Ptr<Packet> p, const Address & addr, uint16_t protocol);
+  ~DualQueueL4SQueueDiscItem ();
+  void AddHeader (void) override;
+  bool Mark (void) override;
+  bool IsL4S (void) override;
+};
+
+class DualQueueClassicQueueDiscItem : public QueueDiscItem
+{
+public:
+  DualQueueClassicQueueDiscItem (Ptr<Packet> p, const Address & addr, uint16_t protocol);
+  ~DualQueueClassicQueueDiscItem ();
+  void AddHeader (void) override;
+  bool Mark (void) override;
+  bool IsL4S (void) override;
+};
+
 /**
  * \ingroup traffic-control
  *

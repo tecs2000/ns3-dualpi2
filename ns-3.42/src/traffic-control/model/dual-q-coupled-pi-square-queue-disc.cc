@@ -30,11 +30,108 @@
 #include "ns3/string.h"
 #include "dual-q-coupled-pi-square-queue-disc.h"
 #include "ns3/drop-tail-queue.h"
+#include "ns3/ipv4.h"
+#include "ns3/ipv4-l3-protocol.h"
+
 #define min (a,b)((a) < (b) ? (a) : (b))
 
 namespace ns3 {
 
 NS_LOG_COMPONENT_DEFINE ("DualQCoupledPiSquareQueueDisc");
+
+/**
+ * L4S Queue Disc Item Implementations
+ */
+DualQueueL4SQueueDiscItem::DualQueueL4SQueueDiscItem (Ptr<Packet> p, const Address & addr, uint16_t protocol)
+  : QueueDiscItem (p, addr, protocol)
+{
+}
+
+DualQueueL4SQueueDiscItem::~DualQueueL4SQueueDiscItem ()
+{
+}
+
+void
+DualQueueL4SQueueDiscItem::AddHeader (void)
+{
+}
+
+bool
+DualQueueL4SQueueDiscItem::Mark (void)
+{
+  Ptr<Packet> m_packet = this->GetPacket();
+
+  Ipv4Header ipv4Header;
+  if (m_packet->PeekHeader(ipv4Header)) {
+    uint8_t ecn = ipv4Header.GetEcn();
+
+    if(ecn == Ipv4Header::ECN_CE) {
+      return true;
+    }
+    else {
+      ipv4Header.SetEcn(Ipv4Header::ECN_CE);
+
+      // Reinsert the modified header back into the packet
+      m_packet->RemoveHeader(ipv4Header);
+      m_packet->AddHeader(ipv4Header);
+
+      return true;
+    }
+  }
+  return false;
+}
+
+bool
+DualQueueL4SQueueDiscItem::IsL4S (void)
+{
+  return true;
+}
+
+/**
+ * Classic Queue Disc Item Implementations
+ */
+DualQueueClassicQueueDiscItem::DualQueueClassicQueueDiscItem (Ptr<Packet> p, const Address & addr, uint16_t protocol)
+  : QueueDiscItem (p, addr, protocol)
+{
+}
+
+DualQueueClassicQueueDiscItem::~DualQueueClassicQueueDiscItem ()
+{
+}
+
+void
+DualQueueClassicQueueDiscItem::AddHeader (void)
+{
+}
+
+bool 
+DualQueueClassicQueueDiscItem::Mark (void) {
+  Ptr<Packet> m_packet = this->GetPacket();
+
+  Ipv4Header ipv4Header;
+  if (m_packet->PeekHeader(ipv4Header)) {
+    
+    // Check if ECN is enabled (NotECT packets cannot be marked)
+    if (ipv4Header.GetEcn() == ns3::Ipv4Header::ECN_NotECT)
+      return false;
+
+    ipv4Header.SetEcn(Ipv4Header::ECN_CE);
+
+    // Reinsert the modified header back into the packet
+    m_packet->RemoveHeader(ipv4Header);
+    m_packet->AddHeader(ipv4Header);
+
+    return true; // Packet marked successfully
+  }
+
+  return false;
+}
+
+bool
+DualQueueClassicQueueDiscItem::IsL4S (void)
+{
+  return false;
+}
 
 class DualQCoupledPiSquareTimestampTag : public Tag
 {
@@ -492,8 +589,8 @@ DualQCoupledPiSquareQueueDisc::CheckConfig (void)
   if (GetNInternalQueues () == 0)
     {
       // Create 2 DropTail queues
-      Ptr<InternalQueue> queue1 = CreateObjectWithAttributes<DropTailQueue<QueueDiscItem> > ("Mode", EnumValue (m_mode));
-      Ptr<InternalQueue> queue2 = CreateObjectWithAttributes<DropTailQueue<QueueDiscItem> > ("Mode", EnumValue (m_mode));
+      Ptr<InternalQueue> queue1 = CreateObjectWithAttributes<DropTailQueue<QueueDiscItem> > ();
+      Ptr<InternalQueue> queue2 = CreateObjectWithAttributes<DropTailQueue<QueueDiscItem> > ();
       if (m_mode == QUEUE_DISC_MODE_PACKETS)
         {
 

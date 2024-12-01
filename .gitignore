@@ -15,3 +15,5 @@
 
 !/ns-3.42/scratch/
 !/ns-3.42/scratch/**
+!/ns-3.42/nr
+!/ns-3.42/nr/**
