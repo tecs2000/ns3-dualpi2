@@ -232,7 +232,7 @@ TypeId DualQCoupledPiSquareQueueDisc::GetTypeId (void)
                                       QUEUE_DISC_MODE_PACKETS, "QUEUE_DISC_MODE_PACKETS"))
     .AddAttribute ("MeanPktSize",
                    "Average of packet size",
-                   UintegerValue (1000),
+                   UintegerValue (1024),
                    MakeUintegerAccessor (&DualQCoupledPiSquareQueueDisc::m_meanPktSize),
                    MakeUintegerChecker<uint32_t> ())
     .AddAttribute ("A",
@@ -286,6 +286,7 @@ DualQCoupledPiSquareQueueDisc::DualQCoupledPiSquareQueueDisc ()
   NS_LOG_FUNCTION (this);
   m_uv = CreateObject<UniformRandomVariable> ();
   m_rtrsEvent = Simulator::Schedule (m_sUpdate, &DualQCoupledPiSquareQueueDisc::CalculateP, this);
+  m_queueSizeBytes = 0;
 }
 
 DualQCoupledPiSquareQueueDisc::~DualQCoupledPiSquareQueueDisc ()
@@ -307,6 +308,13 @@ DualQCoupledPiSquareQueueDisc::SetMode (QueueDiscMode mode)
 {
   NS_LOG_FUNCTION (this << mode);
   m_mode = mode;
+}
+
+int
+DualQCoupledPiSquareQueueDisc::GetQueueSizeBytes (void)
+{
+  NS_LOG_FUNCTION (this);
+  return m_queueSizeBytes;
 }
 
 DualQCoupledPiSquareQueueDisc::QueueDiscMode
@@ -402,6 +410,7 @@ DualQCoupledPiSquareQueueDisc::DoEnqueue (Ptr<QueueDiscItem> item)
         }
     }
 
+  m_queueSizeBytes += item->GetSize ();
   bool retval = GetInternalQueue (queueNumber)->Enqueue (item);
   NS_LOG_LOGIC ("Number packets in queue-number " << queueNumber << ": " << GetInternalQueue (queueNumber)->GetNPackets ());
   return retval;
@@ -523,6 +532,8 @@ DualQCoupledPiSquareQueueDisc::DoDequeue ()
               item->Mark ();
               m_stats.unforcedL4SMark++;
             }
+
+          m_queueSizeBytes -= item->GetSize ();
           return item;
         }
 
@@ -543,6 +554,8 @@ DualQCoupledPiSquareQueueDisc::DoDequeue ()
                   return item;
                 }
             }
+
+          m_queueSizeBytes -= item->GetSize ();
           return item;
         }
     }

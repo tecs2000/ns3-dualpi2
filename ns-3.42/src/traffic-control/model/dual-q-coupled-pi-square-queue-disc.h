@@ -120,6 +120,13 @@ public:
   QueueDiscMode GetMode (void);
 
   /**
+   * \brief Get the current queue size in bytes. Specially useful when queue mode is packets.
+   *
+   * \returns The queue size in bytes.
+   */
+  int GetQueueSizeBytes (void);
+
+  /**
    * \brief Get the current value of the queue in bytes or packets.
    *
    * \returns The queue size in bytes or packets.
@@ -210,6 +217,8 @@ private:
   Time m_qDelay;                                //!< Current value of queue delay
   EventId m_rtrsEvent;                          //!< Event used to decide the decision of interval of drop probability calculation
   Ptr<UniformRandomVariable> m_uv;              //!< Rng stream
+
+  int m_queueSizeBytes;                         //!< Current size of the queue in bytes
 };
 
 }    // namespace ns3
