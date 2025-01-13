@@ -35,6 +35,7 @@ NrRlcUm::NrRlcUm()
 {
     NS_LOG_FUNCTION(this);
     aqm = CreateObject<DualQCoupledPiSquareQueueDisc>();
+    aqm->SetQueueLimit(10); // set to 10 in accordance to m_maxTxBufferSize 
     aqm->Initialize ();
     m_reassemblingState = WAITING_S0_FULL;
 }
@@ -54,7 +55,7 @@ NrRlcUm::GetTypeId()
             .AddConstructor<NrRlcUm>()
             .AddAttribute("MaxTxBufferSize",
                           "Maximum Size of the Transmission Buffer (in Bytes)",
-                          UintegerValue(10 * 1024),
+                          UintegerValue(10 * 1024), // 10 pkts of 1024 bytes
                           MakeUintegerAccessor(&NrRlcUm::m_maxTxBufferSize),
                           MakeUintegerChecker<uint32_t>())
             .AddAttribute("ReorderingTimer",
@@ -124,6 +125,53 @@ void
 NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
 {
     NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid << p->GetSize());
+    
+    // dualpi2
+    // int aqmBytes = aqm->GetQueueSize();
+    // if(aqmBytes + p->GetSize() <= m_maxTxBufferSize){
+    //     if (m_enablePdcpDiscarding)
+    //     {
+    //         // discart the packet
+    //         uint32_t headOfLineDelayInMs = 0;
+    //         uint32_t discardTimerMs =
+    //             (m_discardTimerMs > 0) ? m_discardTimerMs : m_packetDelayBudgetMs;
+
+    //         if (!m_txBuffer.empty())
+    //             headOfLineDelayInMs = aqm->GetQueueDelay().GetMilliSeconds();
+            
+    //         NS_LOG_DEBUG("head of line delay in MS:" << headOfLineDelayInMs);
+    //         if (headOfLineDelayInMs > discardTimerMs)
+    //         {
+    //             NS_LOG_INFO("Tx HOL is higher than this packet can allow. RLC SDU discarded");
+    //             NS_LOG_DEBUG("headOfLineDelayInMs    = " << headOfLineDelayInMs);
+    //             NS_LOG_DEBUG("m_packetDelayBudgetMs    = " << m_packetDelayBudgetMs);
+    //             NS_LOG_DEBUG("packet size     = " << p->GetSize());
+    //             m_txDropTrace(p);
+    //         }
+    //     }
+
+    //     /** Store PDCP PDU */
+    //     NS_LOG_INFO("Adding RLC SDU to aqm after adding NrRlcSduStatusTag: FULL_SDU");
+
+    //     NrRlcSduStatusTag tag;
+    //     tag.SetStatus(NrRlcSduStatusTag::FULL_SDU);
+    //     p->AddPacketTag(tag);
+
+    //     // enqueue the packet to the AQM
+    //     if (isL4S(p)) {
+    //         Ptr<DualQueueL4SQueueDiscItem> item = Create<DualQueueL4SQueueDiscItem>(p, dest, 0);
+    //         aqm->Enqueue(item);
+    //     } else {
+    //         Ptr<DualQueueClassicQueueDiscItem> item = Create<DualQueueClassicQueueDiscItem>(p, dest, 0);
+    //         aqm->Enqueue(item);
+    //     }
+
+    //     NS_LOG_LOGIC("NumOfBuffers = " << aqm->GetQueueSize());
+    //     NS_LOG_LOGIC("txBufferSize = " << m_txBufferSize);
+    // }
+    // end
+    
+    // dualpi2 and txbuffer
     if (m_txBufferSize + p->GetSize() <= m_maxTxBufferSize)
     {
         if (m_enablePdcpDiscarding)
@@ -221,6 +269,16 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
         return;
     }
 
+    if(aqm->GetQueueSize() == 0) {
+        NS_LOG_LOGIC("No data pending in AQM");
+        return;
+    }
+    /**
+     * DualPi2 AQM
+     */
+    Ptr<Packet> aqmFirstSegment = aqm->Dequeue()->GetPacket();;
+    bool l4s = isL4S(aqmFirstSegment);
+
     Ptr<Packet> firstSegment = m_txBuffer.begin()->m_pdu->Copy();
     Time firstSegmentTime = m_txBuffer.begin()->m_waitingSince;
 
@@ -258,13 +316,18 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
             // Note: This is the only place where a PDU is segmented and
             // therefore its status can change
             NrRlcSduStatusTag oldTag;
+            NrRlcSduStatusTag aqmOldTag;
             NrRlcSduStatusTag newTag;
             firstSegment->RemovePacketTag(oldTag);
+
+            aqmFirstSegment->RemovePacketTag(aqmOldTag); //dualpi2
+
             newSegment->RemovePacketTag(newTag);
             if (oldTag.GetStatus() == NrRlcSduStatusTag::FULL_SDU)
             {
                 newTag.SetStatus(NrRlcSduStatusTag::FIRST_SEGMENT);
-                oldTag.SetStatus(NrRlcSduStatusTag::LAST_SEGMENT);
+                oldTag.SetStatus(NrRlcSduStatusTag::LAST_SEGMENT); 
+                aqmOldTag.SetStatus(NrRlcSduStatusTag::LAST_SEGMENT); //dualpi2
             }
             else if (oldTag.GetStatus() == NrRlcSduStatusTag::LAST_SEGMENT)
             {
@@ -274,14 +337,23 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
 
             // Give back the remaining segment to the transmission buffer
             firstSegment->RemoveAtStart(currSegmentSize);
+            aqmFirstSegment->RemoveAtStart(currSegmentSize); //dualpi2
             NS_LOG_LOGIC(
                 "    firstSegment size (after RemoveAtStart) = " << firstSegment->GetSize());
             if (firstSegment->GetSize() > 0)
             {
                 firstSegment->AddPacketTag(oldTag);
-
                 m_txBuffer.insert(m_txBuffer.begin(), TxPdu(firstSegment, firstSegmentTime));
                 m_txBufferSize += m_txBuffer.begin()->m_pdu->GetSize();
+                
+                aqmFirstSegment->AddPacketTag(aqmOldTag); //dualpi2
+                if (l4s) {
+                    Ptr<DualQueueL4SQueueDiscItem> item = Create<DualQueueL4SQueueDiscItem>(aqmFirstSegment, dest, 0);
+                    aqm->Requeue(item);
+                } else {
+                    Ptr<DualQueueClassicQueueDiscItem> item = Create<DualQueueClassicQueueDiscItem>(aqmFirstSegment, dest, 0);
+                    aqm->Requeue(item);
+                }
 
                 NS_LOG_LOGIC("    TX buffer: Give back the remaining segment");
                 NS_LOG_LOGIC("    TX buffers = " << m_txBuffer.size());
@@ -303,6 +375,7 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
             // Segment is completely taken or
             // the remaining segment is given back to the transmission buffer
             firstSegment = nullptr;
+            aqmFirstSegment = nullptr; //dualpi2
 
             // Put status tag once it has been adjusted
             newSegment->AddPacketTag(newTag);
@@ -325,14 +398,16 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
             // (NO more segments) → exit
             // break;
         }
+        // TODO : add dualpi2 aqm emptiness check
         else if ((nextSegmentSize - firstSegment->GetSize() <= 2) || m_txBuffer.empty())
         {
             NS_LOG_LOGIC(
                 "    IF nextSegmentSize - firstSegment->GetSize () <= 2 || txBuffer.size == 0");
             // Add txBuffer.FirstBuffer to DataField
-            dataFieldAddedSize = firstSegment->GetSize();
+            dataFieldAddedSize = firstSegment->GetSize(); // TODO : change to aqmFirstSegment
             dataField.push_back(firstSegment);
             firstSegment = nullptr;
+            aqmFirstSegment = nullptr; //dualpi2
 
             // ExtensionBit (Next_Segment - 1) = 0
             rlcHeader.PushExtensionBit(NrRlcHeader::DATA_FIELD_FOLLOWS);
@@ -387,6 +462,9 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
             firstSegmentTime = m_txBuffer.begin()->m_waitingSince;
             m_txBufferSize -= firstSegment->GetSize();
             m_txBuffer.pop_front();
+
+            aqmFirstSegment = aqm->Dequeue()->GetPacket(); //dualpi2
+
             NS_LOG_LOGIC("        txBufferSize = " << m_txBufferSize);
         }
     }
@@ -464,6 +542,7 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
     NS_LOG_INFO("Forward RLC PDU to MAC Layer");
     m_macSapProvider->TransmitPdu(params);
 
+    // TODO : check aqm dualpi2 emptiness
     if (!m_txBuffer.empty())
     {
         m_rbsTimer.Cancel();
@@ -1207,12 +1286,18 @@ NrRlcUm::DoReportBufferStatus()
     Time holDelay(0);
     uint32_t queueSize = 0;
 
+    // TODO : change for dualpi2 aqm
     if (!m_txBuffer.empty())
     {
         holDelay = Simulator::Now() - m_txBuffer.front().m_waitingSince;
 
         queueSize =
             m_txBufferSize + 2 * m_txBuffer.size(); // Data in tx queue + estimated headers size
+    }
+
+    if(aqm->GetQueueSize() != 0){
+        queueSize =
+            m_txBufferSize + 2 * aqm->GetQueueSize(); // Data in tx queue + estimated headers size
     }
 
     NrMacSapProvider::ReportBufferStatusParameters r;
