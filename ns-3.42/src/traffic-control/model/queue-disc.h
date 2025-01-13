@@ -518,6 +518,13 @@ class QueueDisc : public Object
      */
     virtual WakeMode GetWakeMode() const;
 
+    /**
+     * Modelled after the Linux function dev_requeue_skb (net/sched/sch_generic.c)
+     * Requeues a packet whose transmission failed.
+     * \param item the packet to requeue
+     */
+    void Requeue(Ptr<QueueDiscItem> item);
+
     // Reasons for dropping packets
     static constexpr const char* INTERNAL_QUEUE_DROP =
         "Dropped by internal queue"; //!< Packet dropped by an internal queue
@@ -660,13 +667,6 @@ class QueueDisc : public Object
      * \return the requeued packet, if any, or the packet dequeued by the queue disc, otherwise.
      */
     Ptr<QueueDiscItem> DequeuePacket();
-
-    /**
-     * Modelled after the Linux function dev_requeue_skb (net/sched/sch_generic.c)
-     * Requeues a packet whose transmission failed.
-     * \param item the packet to requeue
-     */
-    void Requeue(Ptr<QueueDiscItem> item);
 
     /**
      * Modelled after the Linux function sch_direct_xmit (net/sched/sch_generic.c)
