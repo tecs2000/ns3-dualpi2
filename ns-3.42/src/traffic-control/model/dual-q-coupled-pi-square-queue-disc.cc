@@ -359,8 +359,40 @@ DualQCoupledPiSquareQueueDisc::GetStats ()
 Time
 DualQCoupledPiSquareQueueDisc::GetQueueDelay (void)
 {
-  NS_LOG_FUNCTION (this);
-  return m_qDelay;
+    NS_LOG_FUNCTION(this);
+
+    Ptr<const QueueDiscItem> item1;
+    Ptr<const QueueDiscItem> item2;
+    Time classicQueueTime;
+    Time l4sQueueTime;
+    DualQCoupledPiSquareTimestampTag tag1;
+    DualQCoupledPiSquareTimestampTag tag2;
+
+    if ((item1 = GetInternalQueue(0)->Peek()))
+    {
+        item1->GetPacket()->PeekPacketTag(tag1);
+        classicQueueTime = tag1.GetTxTime();
+    }
+    else
+    {
+        classicQueueTime = Time(Seconds(0));
+    }
+
+    if ((item2 = GetInternalQueue(1)->Peek()))
+    {
+        item2->GetPacket()->PeekPacketTag(tag2);
+        l4sQueueTime = tag2.GetTxTime();
+    }
+    else
+    {
+        l4sQueueTime = Time(Seconds(0));
+    }
+
+    if (classicQueueTime >= l4sQueueTime)
+        return classicQueueTime;
+
+    else
+        return l4sQueueTime;
 }
 
 double
@@ -402,10 +434,12 @@ DualQCoupledPiSquareQueueDisc::DoEnqueue (Ptr<QueueDiscItem> item)
     {
       if (item->IsL4S ())
         {
+          NS_LOG_INFO("Enqueuing L4S packet");
           queueNumber = 1;
         }
       else
         {
+          NS_LOG_INFO("Enqueuing Classic packet");
           queueNumber = 0;
         }
     }
