@@ -569,7 +569,7 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
     if (aqm->GetQueueSize() == 0)
     {
         NS_LOG_LOGIC("No data pending in the AQM, skipping...");
-        // return; // TODO uncomment this line once migration to dualpi2 finishes
+        return;
     }
     else // TODO remove this else once there will be a return statement above
     {
