@@ -49,6 +49,7 @@ class NrRlcUm : public NrRlc
     void DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams) override;
     void DoNotifyHarqDeliveryFailure() override;
     void DoReceivePdu(NrMacSapUser::ReceivePduParameters rxPduParams) override;
+    static bool isL4S(ns3::Ptr<ns3::Packet> packet); ///< check if the packet is of L4S traffic
 
   private:
     /// Expire reordering timer
@@ -166,7 +167,6 @@ class NrRlcUm : public NrRlc
     Address dest;                             ///< destination address
     Ptr<DualQCoupledPiSquareQueueDisc> aqm;   ///< Dual Queue Coupled PI Square queue disc
 
-    bool isL4S(ns3::Ptr<ns3::Packet> packet); ///< check if the packet is of L4S traffic
 };
 
 } // namespace ns3

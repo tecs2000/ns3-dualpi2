@@ -100,32 +100,22 @@ NrRlcUm::isL4S(Ptr<Packet> packet)
     if (packet->PeekHeader(ipv4Header))
     {
         uint8_t ecn = ipv4Header.GetEcn();
-        NS_LOG_FUNCTION(this << " IP-ECN field value: " << static_cast<uint32_t>(ecn));
 
         // Check ECN field
         if (ecn == Ipv4Header::ECN_NotECT)
-        {
-            NS_LOG_FUNCTION(this << " Not ECN-Capable Transport (Not-ECT)");
             return false;
-        }
+        
         else if (ecn == Ipv4Header::ECN_ECT1)
-        {
-            NS_LOG_FUNCTION(this << "ECN-Capable Transport (ECT(1))");
             return true;
-        }
+        
         else if (ecn == Ipv4Header::ECN_ECT0)
-        {
-            NS_LOG_FUNCTION(this << "ECN-Capable Transport (ECT(0))");
             return false;
-        }
+        
         else if (ecn == Ipv4Header::ECN_CE)
-        {
-            NS_LOG_FUNCTION(this << "Congestion Experienced (CE)");
             return true;
-        }
     }
 
-    NS_LOG_FUNCTION(this << "Failed to peek IP header from the packet");
+    std::cout << "Ipv4Header not found" << std::endl;
     return false;
 }
 
@@ -225,11 +215,23 @@ NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
                 // enqueue the packet to the AQM
                 Ptr<QueueDiscItem> item;
 
+                Ipv4Header ipv4Header;
+                if(aqmPacket->PeekHeader(ipv4Header)){
+                    NS_LOG_INFO("NrRlcUm:: a ipv4 header is available");
+                }
+                NS_LOG_INFO("Packet received from PDCP data. ECN = " << ipv4Header.GetEcn());
+
                 if (isL4S(aqmPacket))
+                {
+                    NS_LOG_INFO("Received a L4S packet");
                     item = Create<DualQueueL4SQueueDiscItem>(aqmPacket, dest, 0);
+                }
 
                 else
+                {
+                    NS_LOG_INFO("Received a Classic packet");
                     item = Create<DualQueueClassicQueueDiscItem>(aqmPacket, dest, 0);
+                }
 
                 item->SetTimeStamp(Simulator::Now());
                 aqm->Enqueue(item);
