@@ -337,10 +337,16 @@ DualQCoupledPiSquareQueueDisc::GetQueueSize (void)
   NS_LOG_FUNCTION (this);
   if (GetMode () == QUEUE_DISC_MODE_BYTES)
     {
+      NS_ASSERT(GetInternalQueue (0)->GetNBytes () >= 0);
+      NS_ASSERT(GetInternalQueue (1)->GetNBytes () >= 0);
+
       return (GetInternalQueue (0)->GetNBytes () + GetInternalQueue (1)->GetNBytes ());
     }
   else if (GetMode () == QUEUE_DISC_MODE_PACKETS)
     {
+      NS_ASSERT(GetInternalQueue (0)->GetNPackets () >= 0);
+      NS_ASSERT(GetInternalQueue (1)->GetNPackets () >= 0);
+
       return (GetInternalQueue (0)->GetNPackets () + GetInternalQueue (1)->GetNPackets ());
     }
   else
@@ -414,7 +420,7 @@ bool
 DualQCoupledPiSquareQueueDisc::DoEnqueue (Ptr<QueueDiscItem> item)
 {
   NS_LOG_FUNCTION (this << item);
-  uint8_t queueNumber;
+  bool queueNumber;
 
   // attach arrival time to packet
   Ptr<Packet> p = item->GetPacket ();
@@ -446,7 +452,8 @@ DualQCoupledPiSquareQueueDisc::DoEnqueue (Ptr<QueueDiscItem> item)
 
   m_queueSizeBytes += item->GetSize ();
   bool retval = GetInternalQueue (queueNumber)->Enqueue (item);
-  NS_LOG_LOGIC ("Number packets in queue-number " << queueNumber << ": " << GetInternalQueue (queueNumber)->GetNPackets ());
+  NS_LOG_INFO ("Number packets in queue-number " << (int) queueNumber << ": " << GetInternalQueue (queueNumber)->GetNPackets ());
+  NS_LOG_INFO ("Number packets in queue-number " << (int) !queueNumber << ": " << GetInternalQueue (!queueNumber)->GetNPackets ());
   return retval;
 }
 
@@ -511,6 +518,8 @@ void DualQCoupledPiSquareQueueDisc::CalculateP ()
   m_classicDropProb = m_dropProb * m_dropProb;
   m_qDelayOld = qDelay;
   m_rtrsEvent = Simulator::Schedule (m_tUpdate, &DualQCoupledPiSquareQueueDisc::CalculateP, this);
+  
+  NS_LOG_INFO(this << " Finished computing drop probility: " << m_classicDropProb);
 }
 
 Ptr<QueueDiscItem>
