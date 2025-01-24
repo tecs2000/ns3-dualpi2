@@ -9,9 +9,10 @@
 #include "nr-rlc-header.h"
 #include "nr-rlc-sdu-status-tag.h"
 #include "nr-rlc-tag.h"
+#include "nr-pdcp-header.h"
 
 #include "ns3/ipv4-l3-protocol.h"
-#include "ns3/ipv4.h"
+#include "ns3/ipv4-header.h"
 #include "ns3/log.h"
 #include "ns3/object.h"
 #include "ns3/simulator.h"
@@ -96,12 +97,10 @@ NrRlcUm::DoDispose()
 bool
 NrRlcUm::isL4S(Ptr<Packet> packet)
 {
-    Ipv4Header ipv4Header;
-    if (packet->PeekHeader(ipv4Header))
+    NrPdcpHeader pdcpHeader;
+    if (packet->PeekHeader(pdcpHeader))
     {
-        uint8_t ecn = ipv4Header.GetEcn();
-
-        // Check ECN field
+        uint8_t ecn = pdcpHeader.GetEct();
         if (ecn == Ipv4Header::ECN_NotECT)
             return false;
         
@@ -114,8 +113,7 @@ NrRlcUm::isL4S(Ptr<Packet> packet)
         else if (ecn == Ipv4Header::ECN_CE)
             return true;
     }
-
-    std::cout << "Ipv4Header not found" << std::endl;
+    std::cout << "NrPdcpHeader not found" << std::endl;
     return false;
 }
 
@@ -215,21 +213,15 @@ NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
                 // enqueue the packet to the AQM
                 Ptr<QueueDiscItem> item;
 
-                Ipv4Header ipv4Header;
-                if(aqmPacket->PeekHeader(ipv4Header)){
-                    NS_LOG_INFO("NrRlcUm:: a ipv4 header is available");
-                }
-                NS_LOG_INFO("Packet received from PDCP data. ECN = " << ipv4Header.GetEcn());
-
                 if (isL4S(aqmPacket))
                 {
-                    NS_LOG_INFO("Received a L4S packet");
+                    NS_LOG_INFO(this << " Received a L4S packet");
                     item = Create<DualQueueL4SQueueDiscItem>(aqmPacket, dest, 0);
                 }
 
                 else
                 {
-                    NS_LOG_INFO("Received a Classic packet");
+                    NS_LOG_INFO(this << " Received a Classic packet");
                     item = Create<DualQueueClassicQueueDiscItem>(aqmPacket, dest, 0);
                 }
 
