@@ -8,6 +8,7 @@
 #include "ns3/internet-module.h"
 #include "ns3/mobility-module.h"
 #include "ns3/nr-module.h"
+#include "ns3/eps-bearer.h"
 #include "ns3/point-to-point-module.h"
 
 /** -------------- Topology --------------
@@ -26,8 +27,7 @@ NodeContainer remoteHosts;
 
 Ptr<Node> pgw;
 Ptr<Node> sgw;
-Ptr<Node> remoteHost1;
-// Ptr<Node> remoteHost2;
+Ptr<Node> remoteHost;
 
 int numberUes;
 int numberGnbs;
@@ -60,12 +60,11 @@ main(int argc, char* argv[])
     // LogComponentEnable("NrGnbMac", LOG_LEVEL_ALL);
     // LogComponentEnable("NrMacSchedulerNs3", LOG_LEVEL_ALL);
     // LogComponentEnable("NrMacSchedulerLCG", LOG_LEVEL_ALL);
-    LogComponentEnable("NrPdcp", LOG_LEVEL_ALL);
     LogComponentEnable("DualQCoupledPiSquareQueueDisc", LOG_LEVEL_INFO);
 
     numberGnbs = 1;
     numberUes = 1;
-    numberRemoteHosts = 2;
+    numberRemoteHosts = 1;
 
     NS_LOG_INFO("Creating " << numberGnbs << " gNBs" <<
                 " and " << numberUes << " UEs" << 
@@ -104,8 +103,7 @@ main(int argc, char* argv[])
 
     pgw = core->GetPgwNode();
     sgw = core->GetSgwNode();
-    remoteHost1 = remoteHosts.Get(0);
-    // remoteHost2 = remoteHosts.Get(1);
+    remoteHost = remoteHosts.Get(0);
 
     SetMobility();
 
@@ -176,8 +174,7 @@ main(int argc, char* argv[])
     p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
     p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
 
-    NetDeviceContainer internetDevices1 = p2ph.Install(pgw, remoteHost1);
-    // NetDeviceContainer internetDevices2 = p2ph.Install(pgw, remoteHost2);
+    NetDeviceContainer internetDevices1 = p2ph.Install(pgw, remoteHost);
 
     Ipv4AddressHelper ipv4h;
     Ipv4StaticRoutingHelper ipv4RoutingHelper;
@@ -185,20 +182,13 @@ main(int argc, char* argv[])
     ipv4h.SetBase("1.0.0.0", "255.0.0.0");
     Ipv4InterfaceContainer internetIpIfaces1 = ipv4h.Assign(internetDevices1);
 
-    // ipv4h.SetBase("2.0.0.0", "255.0.0.0");
-    // Ipv4InterfaceContainer internetIpIfaces2 = ipv4h.Assign(internetDevices2);
-
     Ptr<Ipv4StaticRouting> remoteHostStaticRouting1 =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost1->GetObject<Ipv4>());
+        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
     remoteHostStaticRouting1->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
-
-    // Ptr<Ipv4StaticRouting> remoteHostStaticRouting2 = 
-    //     ipv4RoutingHelper.GetStaticRouting(remoteHost2->GetObject<Ipv4>());
-    // remoteHostStaticRouting2->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
 
     internet.Install(uesContainer);
 
-    Ipv4InterfaceContainer ueIpIface = core->AssignUeIpv4Address(NetDeviceContainer(ueNetDev));
+    Ipv4InterfaceContainer ueIpIface = core->AssignUeIpv4Address(ueNetDev);
 
     // Set the default gateway for the UEs
     for (uint32_t j = 0; j < uesContainer.GetN(); ++j)
@@ -231,8 +221,7 @@ main(int argc, char* argv[])
 
     FlowMonitorHelper flowmonHelper;
     NodeContainer endpointNodes;
-    endpointNodes.Add(remoteHost1);
-    // endpointNodes.Add(remoteHost2);
+    endpointNodes.Add(remoteHost);
     endpointNodes.Add(uesContainer);
 
     Ptr<ns3::FlowMonitor> monitor = flowmonHelper.Install(endpointNodes);
@@ -299,8 +288,7 @@ SetMobility()
     positionAlloc->Add(Vector(enbX, enbY, 0.0)); // gNB
     positionAlloc->Add(Vector(enbX, enbY - 30.0, 0.0)); //pgw
     positionAlloc->Add(Vector(enbX, enbY - 10.0, 0.0)); //sgw
-    positionAlloc->Add(Vector(enbX - 75.0, enbY - 50.0, 0.0)); //remoteHost1
-    // positionAlloc->Add(Vector(enbX + 75.0, enbY - 50.0, 0.0)); //remoteHost2
+    positionAlloc->Add(Vector(enbX - 75.0, enbY - 50.0, 0.0)); //remoteHost
 
     nodesMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
     nodesMobility.SetPositionAllocator(positionAlloc);
@@ -346,17 +334,17 @@ CheckCourse(std::string context, Ptr<MobilityModel> mob)
 void
 BuildApps(Ipv4InterfaceContainer& ueIps)
 {
-    // Configure the TCP Cubic for the first application
-    Config::Set("/NodeList/1/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpCubic::GetTypeId()));
-
-    // First application: remoteHost -> ue (using Cubic)
-    uint16_t dlPortClassic = 1234;
-    Address sinkLocalAddressClassic(InetSocketAddress(Ipv4Address::GetAny(), dlPortClassic));
+    uint16_t sinkPort = 1234;
+    Address sinkLocalAddressClassic(InetSocketAddress(Ipv4Address::GetAny(), sinkPort));
     PacketSinkHelper dlSinkClassic("ns3::TcpSocketFactory", sinkLocalAddressClassic);
     ApplicationContainer sinkAppClassic = dlSinkClassic.Install(uesContainer.Get(0));
     sinkAppClassic.Start(Seconds(1.0));
     sinkAppClassic.Stop(simTime + Seconds(1.0));
 
+    // First application: remoteHost -> ue (using Cubic)
+    // Configure the TCP Cubic for the first application
+    uint16_t dlPortClassic = 1234;
+    Config::Set("/NodeList/1/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpCubic::GetTypeId()));
     BulkSendHelper classicClient("ns3::TcpSocketFactory",
                                  InetSocketAddress(ueIps.GetAddress(0), dlPortClassic));
     classicClient.SetAttribute("MaxBytes", UintegerValue(100000000)); // 100MB
@@ -364,21 +352,14 @@ BuildApps(Ipv4InterfaceContainer& ueIps)
     ApplicationContainer clientAppsClassic;
     AddressValue remoteAddressClassic(InetSocketAddress(ueIps.GetAddress(0), dlPortClassic));
     classicClient.SetAttribute("Remote", remoteAddressClassic);
-    clientAppsClassic.Add(classicClient.Install(remoteHost1));
+    clientAppsClassic.Add(classicClient.Install(remoteHost));
     clientAppsClassic.Start(Seconds(2.0));
     clientAppsClassic.Stop(simTime);
 
-    // Configure the TCP DCTCP for the second application
-    Config::Set("/NodeList/1/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpDctcp::GetTypeId()));
-
     // Second application: remoteHost -> ue (using DCTCP)
+    // Configure the TCP DCTCP for the second application
     uint16_t dlPortScalable = 1235;
-    Address sinkLocalAddressScalable(InetSocketAddress(Ipv4Address::GetAny(), dlPortScalable));
-    PacketSinkHelper dlSinkScalable("ns3::TcpSocketFactory", sinkLocalAddressScalable);
-    ApplicationContainer sinkAppScalable = dlSinkScalable.Install(uesContainer.Get(0));
-    sinkAppScalable.Start(Seconds(1.0));
-    sinkAppScalable.Stop(simTime + Seconds(1.0));
-
+    Config::Set("/NodeList/1/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpDctcp::GetTypeId()));
     BulkSendHelper scalableClient("ns3::TcpSocketFactory",
                                   InetSocketAddress(ueIps.GetAddress(0), dlPortScalable));
     scalableClient.SetAttribute("MaxBytes", UintegerValue(100000000)); // 100MB
@@ -386,7 +367,7 @@ BuildApps(Ipv4InterfaceContainer& ueIps)
     ApplicationContainer clientAppsScalable;
     AddressValue remoteAddressScalable(InetSocketAddress(ueIps.GetAddress(0), dlPortScalable));
     scalableClient.SetAttribute("Remote", remoteAddressScalable);
-    clientAppsScalable.Add(scalableClient.Install(remoteHost1));
+    clientAppsScalable.Add(scalableClient.Install(remoteHost));
     clientAppsScalable.Start(Seconds(2.0));
     clientAppsScalable.Stop(simTime);
 
