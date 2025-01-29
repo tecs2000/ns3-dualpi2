@@ -70,7 +70,7 @@ NrPdcpHeader::GetInstanceTypeId() const
 void
 NrPdcpHeader::Print(std::ostream& os) const
 {
-    os << "ect=" << (uint16_t)m_ect;
+    os << "ECN=" << (uint16_t)m_ect;
     os << " SN=" << m_sequenceNumber;
 }
 

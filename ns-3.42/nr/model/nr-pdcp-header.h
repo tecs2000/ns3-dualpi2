@@ -34,11 +34,11 @@ class NrPdcpHeader : public Header
     ~NrPdcpHeader() override;
 
     /**
-     * \brief Set DC bit
+     * \brief Set ECT bit
      *
-     * \param dcBit DC bit to set
+     * \param l4s 1 if l4s, 0 otherwise
      */
-    void SetEct(uint8_t dcBit);
+    void SetEct(uint8_t l4s);
     /**
      * \brief Set sequence number
      *
@@ -47,9 +47,9 @@ class NrPdcpHeader : public Header
     void SetSequenceNumber(uint16_t sequenceNumber);
 
     /**
-     * \brief Get DC bit
+     * \brief Get ECT bit
      *
-     * \returns DC bit
+     * \returns 1 if l4s, 0 otherwise
      */
     uint8_t GetEct() const;
     /**
