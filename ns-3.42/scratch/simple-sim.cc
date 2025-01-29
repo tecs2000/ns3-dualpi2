@@ -27,7 +27,8 @@ NodeContainer remoteHosts;
 
 Ptr<Node> pgw;
 Ptr<Node> sgw;
-Ptr<Node> remoteHost;
+Ptr<Node> remoteHost1;
+Ptr<Node> remoteHost2;
 
 int numberUes;
 int numberGnbs;
@@ -56,15 +57,21 @@ int
 main(int argc, char* argv[])
 {
 
-    LogComponentEnable("NrRlcUm", LOG_LEVEL_ALL);
+    LogComponentEnable("NrRlcUm", LOG_LEVEL_INFO);
+    LogComponentEnable("NrPdcp", LOG_LEVEL_INFO);
+    // LogComponentEnable("DualQCoupledPiSquareQueueDisc", LOG_LEVEL_INFO);
+    LogComponentEnable("NrGnbRrc", LOG_LEVEL_INFO);
+    // LogComponentEnable("Temp", LOG_LEVEL_DEBUG);
     // LogComponentEnable("NrGnbMac", LOG_LEVEL_ALL);
     // LogComponentEnable("NrMacSchedulerNs3", LOG_LEVEL_ALL);
     // LogComponentEnable("NrMacSchedulerLCG", LOG_LEVEL_ALL);
-    LogComponentEnable("DualQCoupledPiSquareQueueDisc", LOG_LEVEL_INFO);
+    // LogComponentEnable("NrUeRrc", LOG_LEVEL_ALL);
+    // LogComponentEnable("TcpDctcp", LOG_LEVEL_ALL);
+    // LogComponentEnable("TcpCubic", LOG_LEVEL_ALL);
 
     numberGnbs = 1;
     numberUes = 1;
-    numberRemoteHosts = 1;
+    numberRemoteHosts = 2;
 
     NS_LOG_INFO("Creating " << numberGnbs << " gNBs" <<
                 " and " << numberUes << " UEs" << 
@@ -75,13 +82,13 @@ main(int argc, char* argv[])
     remoteHosts.Create(numberRemoteHosts);
 
     for (int i = 0; i < numberUes; i++)
-        NS_LOG_DEBUG("UE " << i << " -> " << uesContainer.Get(i));
+        NS_LOG_DEBUG("UE " << i << " -> " << uesContainer.Get(i)->GetId());
 
     for (int i = 0; i < numberGnbs; i++)
-        NS_LOG_DEBUG("gNB " << i << " -> " << gnbContainer.Get(i));
+        NS_LOG_DEBUG("gNB " << i << " -> " << gnbContainer.Get(i)->GetId());
 
     for (int i = 0; i < numberRemoteHosts; i++)
-        NS_LOG_DEBUG("remoteHost " << i << " -> " << remoteHosts.Get(i));
+        NS_LOG_DEBUG("remoteHost " << i << " -> " << remoteHosts.Get(i)->GetId());
 
     uint16_t numerology = 0;
     double centralFrequency = 4e9;
@@ -103,7 +110,8 @@ main(int argc, char* argv[])
 
     pgw = core->GetPgwNode();
     sgw = core->GetSgwNode();
-    remoteHost = remoteHosts.Get(0);
+    remoteHost1 = remoteHosts.Get(0);
+    remoteHost2 = remoteHosts.Get(1);
 
     SetMobility();
 
@@ -174,7 +182,8 @@ main(int argc, char* argv[])
     p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
     p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.000)));
 
-    NetDeviceContainer internetDevices1 = p2ph.Install(pgw, remoteHost);
+    NetDeviceContainer internetDevices1 = p2ph.Install(pgw, remoteHost1);
+    NetDeviceContainer internetDevices2 = p2ph.Install(pgw, remoteHost2);
 
     Ipv4AddressHelper ipv4h;
     Ipv4StaticRoutingHelper ipv4RoutingHelper;
@@ -182,9 +191,16 @@ main(int argc, char* argv[])
     ipv4h.SetBase("1.0.0.0", "255.0.0.0");
     Ipv4InterfaceContainer internetIpIfaces1 = ipv4h.Assign(internetDevices1);
 
+    ipv4h.SetBase("2.0.0.0", "255.0.0.0");
+    Ipv4InterfaceContainer internetIpIfaces2 = ipv4h.Assign(internetDevices2);
+
     Ptr<Ipv4StaticRouting> remoteHostStaticRouting1 =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
+        ipv4RoutingHelper.GetStaticRouting(remoteHost1->GetObject<Ipv4>());
     remoteHostStaticRouting1->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+
+    Ptr<Ipv4StaticRouting> remoteHostStaticRouting2 = 
+        ipv4RoutingHelper.GetStaticRouting(remoteHost2->GetObject<Ipv4>());
+    remoteHostStaticRouting2->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
 
     internet.Install(uesContainer);
 
@@ -203,10 +219,6 @@ main(int argc, char* argv[])
 
     // //pcap files and debug for nodeList
     internet.EnablePcapIpv4("debugUe", uesContainer);
-    for (uint32_t i = 0; i < NodeList::GetNNodes(); i++)
-    {
-        NS_LOG_DEBUG("NodeList[" << i << "]: " << NodeList::GetNode(i));
-    }
 
     // ---------------------------- Application ----------------------------
 
@@ -221,7 +233,8 @@ main(int argc, char* argv[])
 
     FlowMonitorHelper flowmonHelper;
     NodeContainer endpointNodes;
-    endpointNodes.Add(remoteHost);
+    endpointNodes.Add(remoteHost1);
+    endpointNodes.Add(remoteHost2);
     endpointNodes.Add(uesContainer);
 
     Ptr<ns3::FlowMonitor> monitor = flowmonHelper.Install(endpointNodes);
@@ -250,10 +263,14 @@ main(int argc, char* argv[])
 
     outFile.setf(std::ios_base::fixed);
 
+    int j = 0;
     for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
          i != stats.end();
          ++i)
     {
+        std::string histOutPath = "histogram-flow-" + std::to_string(j) + ".xml"; 
+        std::ofstream histOutFile(histOutPath);
+
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
         
         outFile << "Flow " << i->first << " (" << t.sourceAddress << ":" << t.sourcePort << " -> "
@@ -262,6 +279,11 @@ main(int argc, char* argv[])
         outFile << "  Rx Packets: " << i->second.rxPackets << "\n";
         outFile << "  Throughput: " << i->second.rxBytes * 8.0 / simTime.GetSeconds() / 1024 / 1024
                 << " Mbps\n";
+        outFile << "  Lost Packets: " << i->second.lostPackets << "\n";
+
+        i->second.delayHistogram.SerializeToXmlStream(histOutFile, 2, "HistogramDelay");
+        
+        ++j;
     }
 
     outFile.close();
@@ -312,7 +334,7 @@ void
 CheckCourse(std::string context, Ptr<MobilityModel> mob)
 {
     Vector pos = mob->GetPosition();
-    NS_LOG_DEBUG("UE position: " << pos);
+    // NS_LOG_DEBUG("UE position: " << pos);
     Vector vel = mob->GetVelocity();
 
     double ueX = pos.x;
@@ -334,43 +356,52 @@ CheckCourse(std::string context, Ptr<MobilityModel> mob)
 void
 BuildApps(Ipv4InterfaceContainer& ueIps)
 {
-    uint16_t sinkPort = 1234;
-    Address sinkLocalAddressClassic(InetSocketAddress(Ipv4Address::GetAny(), sinkPort));
-    PacketSinkHelper dlSinkClassic("ns3::TcpSocketFactory", sinkLocalAddressClassic);
+    /**
+     * 
+     * UE                   -> Node0
+     * remoteHost1 -> cubic -> Node2
+     * remoteHost2 -> dctcp -> Node3
+     */
+
+    // First application: remoteHost1 -> ue (using Cubic)
+    Config::Set("/NodeList/0/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpCubic::GetTypeId()));
+    Config::Set("/NodeList/2/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpCubic::GetTypeId()));
+    uint16_t dlPortClassic = 1234;
+    Address sinkLocalAddress(InetSocketAddress(Ipv4Address::GetAny(), dlPortClassic));
+    PacketSinkHelper dlSinkClassic("ns3::TcpSocketFactory", sinkLocalAddress);
     ApplicationContainer sinkAppClassic = dlSinkClassic.Install(uesContainer.Get(0));
     sinkAppClassic.Start(Seconds(1.0));
     sinkAppClassic.Stop(simTime + Seconds(1.0));
 
-    // First application: remoteHost -> ue (using Cubic)
-    // Configure the TCP Cubic for the first application
-    uint16_t dlPortClassic = 1234;
-    Config::Set("/NodeList/1/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpCubic::GetTypeId()));
-    BulkSendHelper classicClient("ns3::TcpSocketFactory",
-                                 InetSocketAddress(ueIps.GetAddress(0), dlPortClassic));
-    classicClient.SetAttribute("MaxBytes", UintegerValue(100000000)); // 100MB
+    BulkSendHelper classicClient ("ns3::TcpSocketFactory",
+                                    InetSocketAddress (ueIps.GetAddress(0), dlPortClassic));
+    classicClient.SetAttribute ("MaxBytes", UintegerValue (100000000)); // 100MB
 
     ApplicationContainer clientAppsClassic;
-    AddressValue remoteAddressClassic(InetSocketAddress(ueIps.GetAddress(0), dlPortClassic));
-    classicClient.SetAttribute("Remote", remoteAddressClassic);
-    clientAppsClassic.Add(classicClient.Install(remoteHost));
+    AddressValue remoteAddress(InetSocketAddress(ueIps.GetAddress(0), dlPortClassic));
+    classicClient.SetAttribute("Remote", remoteAddress);
+    clientAppsClassic.Add(classicClient.Install(remoteHost1));
     clientAppsClassic.Start(Seconds(2.0));
     clientAppsClassic.Stop(simTime);
 
-    // Second application: remoteHost -> ue (using DCTCP)
-    // Configure the TCP DCTCP for the second application
-    uint16_t dlPortScalable = 1235;
-    Config::Set("/NodeList/1/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpDctcp::GetTypeId()));
-    BulkSendHelper scalableClient("ns3::TcpSocketFactory",
-                                  InetSocketAddress(ueIps.GetAddress(0), dlPortScalable));
-    scalableClient.SetAttribute("MaxBytes", UintegerValue(100000000)); // 100MB
 
-    ApplicationContainer clientAppsScalable;
-    AddressValue remoteAddressScalable(InetSocketAddress(ueIps.GetAddress(0), dlPortScalable));
-    scalableClient.SetAttribute("Remote", remoteAddressScalable);
-    clientAppsScalable.Add(scalableClient.Install(remoteHost));
-    clientAppsScalable.Start(Seconds(2.0));
-    clientAppsScalable.Stop(simTime);
+    // Second application: remoteHost2 -> ue (l4s)
+    Config::Set("/NodeList/0/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpDctcp::GetTypeId()));
+    Config::Set("/NodeList/3/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpDctcp::GetTypeId()));
+    uint16_t dlPortL4s = 1235;
+    Address sinkLocalAddressL4s(InetSocketAddress(Ipv4Address::GetAny(), dlPortL4s));
+    PacketSinkHelper dlSinkL4s("ns3::TcpSocketFactory", sinkLocalAddressL4s);
+    ApplicationContainer sinkAppL4s = dlSinkL4s.Install(uesContainer.Get(0));
+    sinkAppL4s.Start(Seconds(1.0));
+    sinkAppL4s.Stop(simTime + Seconds(1.0));
 
-    // Restore the default TCP configuration (if needed elsewhere)
-    Config::Set("/NodeList/1/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpCubic::GetTypeId()));
+    BulkSendHelper l4sClient ("ns3::TcpSocketFactory",
+                                InetSocketAddress (ueIps.GetAddress(0), dlPortL4s));
+    l4sClient.SetAttribute ("MaxBytes", UintegerValue (100000000)); // 100MB
+    ApplicationContainer clientAppsL4s;
+    AddressValue remoteAddressL4s(InetSocketAddress(ueIps.GetAddress(0), dlPortL4s));
+    l4sClient.SetAttribute("Remote", remoteAddressL4s);
+    clientAppsL4s.Add(l4sClient.Install(remoteHost2));
+    clientAppsL4s.Start(Seconds(2.0));
+    clientAppsL4s.Stop(simTime);
 }
