@@ -44,6 +44,11 @@ NrRlcUm::NrRlcUm()
 NrRlcUm::~NrRlcUm()
 {
     NS_LOG_FUNCTION(this);
+    
+    uint32_t aqmDrops = aqm->GetStats().forcedDrop + aqm->GetStats().unforcedClassicDrop;
+    uint32_t aqmMarks = aqm->GetStats().unforcedClassicMark + aqm->GetStats().unforcedL4SMark;
+    
+    NS_LOG_INFO("RLC instance " << this << " DualPi2 AQM stats\n  Drops: " << aqmDrops << "\n  Marks: " << aqmMarks);
 }
 
 TypeId
@@ -54,7 +59,7 @@ NrRlcUm::GetTypeId()
             .SetParent<NrRlc>()
             .SetGroupName("Nr")
             .AddConstructor<NrRlcUm>()
-            .AddAttribute("MaxTxBufferSize", // keep this way to avoid conflict with the base class
+            .AddAttribute("MaxTxBufferSize",
                           "Maximum Size of the Transmission Buffer (in Bytes)",
                           UintegerValue(10 * 1024), // 10 pkts of 1024 bytes
                           MakeUintegerAccessor(&NrRlcUm::m_maxAqmBufferSize),
@@ -100,18 +105,10 @@ NrRlcUm::isL4S(Ptr<Packet> packet)
     NrPdcpHeader pdcpHeader;
     if (packet->PeekHeader(pdcpHeader))
     {
-        uint8_t ecn = pdcpHeader.GetEct();
-        if (ecn == Ipv4Header::ECN_NotECT)
-            return false;
-        
-        else if (ecn == Ipv4Header::ECN_ECT1)
+        if (pdcpHeader.GetEct() == 1)
             return true;
         
-        else if (ecn == Ipv4Header::ECN_ECT0)
-            return false;
-        
-        else if (ecn == Ipv4Header::ECN_CE)
-            return true;
+        return false;
     }
     std::cout << "NrPdcpHeader not found" << std::endl;
     return false;
@@ -158,13 +155,13 @@ NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
 
             if (isL4S(p))
             {
-                NS_LOG_INFO(this << " Received a L4S packet");
+                NS_LOG_INFO("RLC " << this << " received a L4S packet");
                 item = Create<DualQueueL4SQueueDiscItem>(p, dest, 0);
             }
 
             else
             {
-                NS_LOG_INFO(this << " Received a Classic packet");
+                NS_LOG_INFO("RLC " << this << " received a Classic packet");
                 item = Create<DualQueueClassicQueueDiscItem>(p, dest, 0);
             }
 
