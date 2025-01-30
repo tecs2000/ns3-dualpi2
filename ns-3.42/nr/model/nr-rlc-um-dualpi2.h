@@ -22,11 +22,11 @@ namespace ns3
 /**
  * LTE RLC Unacknowledged Mode (UM), see 3GPP TS 36.322
  */
-class NrRlcUm : public NrRlc
+class NrRlcUmDualpi2 : public NrRlc
 {
   public:
-    NrRlcUm();
-    ~NrRlcUm() override;
+    NrRlcUmDualpi2();
+    ~NrRlcUmDualpi2() override;
     /**
      * \brief Get the type ID.
      * \return the object TypeId

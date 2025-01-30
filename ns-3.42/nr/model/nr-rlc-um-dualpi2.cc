@@ -4,7 +4,7 @@
 //
 // Author: Manuel Requena <manuel.requena@cttc.es>
 
-#include "nr-rlc-um.h"
+#include "nr-rlc-um-dualpi2.h"
 
 #include "nr-rlc-header.h"
 #include "nr-rlc-sdu-status-tag.h"
@@ -20,11 +20,11 @@
 namespace ns3
 {
 
-NS_LOG_COMPONENT_DEFINE("NrRlcUm");
+NS_LOG_COMPONENT_DEFINE("NrRlcUmDualpi2");
 
-NS_OBJECT_ENSURE_REGISTERED(NrRlcUm);
+NS_OBJECT_ENSURE_REGISTERED(NrRlcUmDualpi2);
 
-NrRlcUm::NrRlcUm()
+NrRlcUmDualpi2::NrRlcUmDualpi2()
     : m_maxAqmBufferSize(10 * 1024),
       m_aqmBufferSize(0),
       m_sequenceNumber(0),
@@ -41,53 +41,53 @@ NrRlcUm::NrRlcUm()
     m_reassemblingState = WAITING_S0_FULL;
 }
 
-NrRlcUm::~NrRlcUm()
+NrRlcUmDualpi2::~NrRlcUmDualpi2()
 {
     NS_LOG_FUNCTION(this);
     
     uint32_t aqmDrops = aqm->GetStats().forcedDrop + aqm->GetStats().unforcedClassicDrop;
     uint32_t aqmMarks = aqm->GetStats().unforcedClassicMark + aqm->GetStats().unforcedL4SMark;
     
-    NS_LOG_INFO("RLC instance " << this << " DualPi2 AQM stats\n  Drops: " << aqmDrops << "\n  Marks: " << aqmMarks);
+    NS_LOG_INFO("RLC Dualpi2 AQM stats\n  Drops: " << aqmDrops << "\n  Marks: " << aqmMarks);
 }
 
 TypeId
-NrRlcUm::GetTypeId()
+NrRlcUmDualpi2::GetTypeId()
 {
     static TypeId tid =
-        TypeId("ns3::NrRlcUm")
+        TypeId("ns3::NrRlcUmDualpi2")
             .SetParent<NrRlc>()
             .SetGroupName("Nr")
-            .AddConstructor<NrRlcUm>()
+            .AddConstructor<NrRlcUmDualpi2>()
             .AddAttribute("MaxTxBufferSize",
                           "Maximum Size of the Transmission Buffer (in Bytes)",
                           UintegerValue(10 * 1024), // 10 pkts of 1024 bytes
-                          MakeUintegerAccessor(&NrRlcUm::m_maxAqmBufferSize),
+                          MakeUintegerAccessor(&NrRlcUmDualpi2::m_maxAqmBufferSize),
                           MakeUintegerChecker<uint32_t>())
             .AddAttribute("ReorderingTimer",
                           "Value of the t-Reordering timer (See section 7.3 of 3GPP TS 36.322)",
                           TimeValue(MilliSeconds(100)),
-                          MakeTimeAccessor(&NrRlcUm::m_reorderingTimerValue),
+                          MakeTimeAccessor(&NrRlcUmDualpi2::m_reorderingTimerValue),
                           MakeTimeChecker())
             .AddAttribute(
                 "EnablePdcpDiscarding",
                 "Whether to use the PDCP discarding, i.e., perform discarding at the moment "
                 "of passing the PDCP SDU to RLC)",
                 BooleanValue(true),
-                MakeBooleanAccessor(&NrRlcUm::m_enablePdcpDiscarding),
+                MakeBooleanAccessor(&NrRlcUmDualpi2::m_enablePdcpDiscarding),
                 MakeBooleanChecker())
             .AddAttribute("DiscardTimerMs",
                           "Discard timer in milliseconds to be used to discard packets. "
                           "If set to 0 then packet delay budget will be used as the discard "
                           "timer value, otherwise it will be used this value.",
                           UintegerValue(0),
-                          MakeUintegerAccessor(&NrRlcUm::m_discardTimerMs),
+                          MakeUintegerAccessor(&NrRlcUmDualpi2::m_discardTimerMs),
                           MakeUintegerChecker<uint32_t>());
     return tid;
 }
 
 void
-NrRlcUm::DoDispose()
+NrRlcUmDualpi2::DoDispose()
 {
     NS_LOG_FUNCTION(this);
     m_reorderingTimer.Cancel();
@@ -100,7 +100,7 @@ NrRlcUm::DoDispose()
  * RLC SAP
  */
 bool
-NrRlcUm::isL4S(Ptr<Packet> packet)
+NrRlcUmDualpi2::isL4S(Ptr<Packet> packet)
 {
     NrPdcpHeader pdcpHeader;
     if (packet->PeekHeader(pdcpHeader))
@@ -115,7 +115,7 @@ NrRlcUm::isL4S(Ptr<Packet> packet)
 }
 
 void
-NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
+NrRlcUmDualpi2::DoTransmitPdcpPdu(Ptr<Packet> p)
 {
     NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid << p->GetSize());
 
@@ -155,13 +155,13 @@ NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
 
             if (isL4S(p))
             {
-                NS_LOG_INFO("RLC " << this << " received a L4S packet");
+                NS_LOG_INFO("RLC Dualpi2 received a L4S packet");
                 item = Create<DualQueueL4SQueueDiscItem>(p, dest, 0);
             }
 
             else
             {
-                NS_LOG_INFO("RLC " << this << " received a Classic packet");
+                NS_LOG_INFO("RLC Dualpi2 received a Classic packet");
                 item = Create<DualQueueClassicQueueDiscItem>(p, dest, 0);
             }
 
@@ -192,10 +192,10 @@ NrRlcUm::DoTransmitPdcpPdu(Ptr<Packet> p)
  */
 
 void
-NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
+NrRlcUmDualpi2::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
 {
     NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid << txOpParams.bytes);
-    NS_LOG_INFO("RLC layer is preparing data for the following Tx opportunity of "
+    NS_LOG_INFO("RLC Dualpi2 layer is preparing data for the following Tx opportunity of "
                 << txOpParams.bytes << " bytes for RNTI=" << m_rnti << ", LCID=" << (uint32_t)m_lcid
                 << ", CCID=" << (uint32_t)txOpParams.componentCarrierId << ", HARQ ID="
                 << (uint32_t)txOpParams.harqId << ", MIMO Layer=" << (uint32_t)txOpParams.layer);
@@ -444,7 +444,7 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
 
     aqmRlcHeader.SetFramingInfo(aqmFramingInfo);
 
-    NS_LOG_LOGIC("RLC header: " << aqmRlcHeader);
+    NS_LOG_LOGIC("RLC Dualpi2 header: " << aqmRlcHeader);
     p->AddHeader(aqmRlcHeader);
 
     // Sender timestamp
@@ -461,24 +461,24 @@ NrRlcUm::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOpParams)
     params.harqProcessId = txOpParams.harqId;
     params.componentCarrierId = txOpParams.componentCarrierId;
 
-    NS_LOG_INFO("Forward RLC PDU to MAC Layer");
+    NS_LOG_INFO("Forward RLC Dualpi2 PDU to MAC Layer");
     m_macSapProvider->TransmitPdu(params);
 
     if (aqm->GetQueueSize() != 0)
     {
         m_rbsTimer.Cancel();
-        m_rbsTimer = Simulator::Schedule(MilliSeconds(10), &NrRlcUm::ExpireRbsTimer, this);
+        m_rbsTimer = Simulator::Schedule(MilliSeconds(10), &NrRlcUmDualpi2::ExpireRbsTimer, this);
     }
 }
 
 void
-NrRlcUm::DoNotifyHarqDeliveryFailure()
+NrRlcUmDualpi2::DoNotifyHarqDeliveryFailure()
 {
     NS_LOG_FUNCTION(this);
 }
 
 void
-NrRlcUm::DoReceivePdu(NrMacSapUser::ReceivePduParameters rxPduParams)
+NrRlcUmDualpi2::DoReceivePdu(NrMacSapUser::ReceivePduParameters rxPduParams)
 {
     NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid << rxPduParams.p->GetSize());
 
@@ -497,7 +497,7 @@ NrRlcUm::DoReceivePdu(NrMacSapUser::ReceivePduParameters rxPduParams)
     // Get RLC header parameters
     NrRlcHeader rlcHeader;
     rxPduParams.p->PeekHeader(rlcHeader);
-    NS_LOG_LOGIC("RLC header: " << rlcHeader);
+    NS_LOG_LOGIC("RLC Dualpi2 header: " << rlcHeader);
     nr::SequenceNumber10 seqNumber = rlcHeader.GetSequenceNumber();
 
     // 5.1.2.2.1 General
@@ -638,7 +638,7 @@ NrRlcUm::DoReceivePdu(NrMacSapUser::ReceivePduParameters rxPduParams)
             NS_LOG_LOGIC("VR(UH) > VR(UR)");
             NS_LOG_LOGIC("Start reordering timer");
             m_reorderingTimer =
-                Simulator::Schedule(m_reorderingTimerValue, &NrRlcUm::ExpireReorderingTimer, this);
+                Simulator::Schedule(m_reorderingTimerValue, &NrRlcUmDualpi2::ExpireReorderingTimer, this);
             m_vrUx = m_vrUh;
             NS_LOG_LOGIC("New VR(UX) = " << m_vrUx);
         }
@@ -646,7 +646,7 @@ NrRlcUm::DoReceivePdu(NrMacSapUser::ReceivePduParameters rxPduParams)
 }
 
 bool
-NrRlcUm::IsInsideReorderingWindow(nr::SequenceNumber10 seqNumber)
+NrRlcUmDualpi2::IsInsideReorderingWindow(nr::SequenceNumber10 seqNumber)
 {
     NS_LOG_FUNCTION(this << seqNumber);
     NS_LOG_LOGIC("Reordering Window: " << m_vrUh << " - " << m_windowSize << " <= " << seqNumber
@@ -668,7 +668,7 @@ NrRlcUm::IsInsideReorderingWindow(nr::SequenceNumber10 seqNumber)
 }
 
 void
-NrRlcUm::ReassembleAndDeliver(Ptr<Packet> packet)
+NrRlcUmDualpi2::ReassembleAndDeliver(Ptr<Packet> packet)
 {
     NrRlcHeader rlcHeader;
     packet->RemoveHeader(rlcHeader);
@@ -1149,7 +1149,7 @@ NrRlcUm::ReassembleAndDeliver(Ptr<Packet> packet)
 }
 
 void
-NrRlcUm::ReassembleOutsideWindow()
+NrRlcUmDualpi2::ReassembleOutsideWindow()
 {
     NS_LOG_LOGIC("Reassemble Outside Window");
 
@@ -1174,7 +1174,7 @@ NrRlcUm::ReassembleOutsideWindow()
 }
 
 void
-NrRlcUm::ReassembleSnInterval(nr::SequenceNumber10 lowSeqNumber, nr::SequenceNumber10 highSeqNumber)
+NrRlcUmDualpi2::ReassembleSnInterval(nr::SequenceNumber10 lowSeqNumber, nr::SequenceNumber10 highSeqNumber)
 {
     NS_LOG_LOGIC("Reassemble SN between " << lowSeqNumber << " and " << highSeqNumber);
 
@@ -1202,7 +1202,7 @@ NrRlcUm::ReassembleSnInterval(nr::SequenceNumber10 lowSeqNumber, nr::SequenceNum
 }
 
 void
-NrRlcUm::DoReportBufferStatus()
+NrRlcUmDualpi2::DoReportBufferStatus()
 {
     Time holDelay(0);
     uint32_t queueSize = 0;
@@ -1230,7 +1230,7 @@ NrRlcUm::DoReportBufferStatus()
 }
 
 void
-NrRlcUm::ExpireReorderingTimer()
+NrRlcUmDualpi2::ExpireReorderingTimer()
 {
     NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid);
     NS_LOG_LOGIC("Reordering timer has expired");
@@ -1262,20 +1262,20 @@ NrRlcUm::ExpireReorderingTimer()
     {
         NS_LOG_LOGIC("Start reordering timer");
         m_reorderingTimer =
-            Simulator::Schedule(m_reorderingTimerValue, &NrRlcUm::ExpireReorderingTimer, this);
+            Simulator::Schedule(m_reorderingTimerValue, &NrRlcUmDualpi2::ExpireReorderingTimer, this);
         m_vrUx = m_vrUh;
         NS_LOG_LOGIC("New VR(UX) = " << m_vrUx);
     }
 }
 
 void
-NrRlcUm::ExpireRbsTimer()
+NrRlcUmDualpi2::ExpireRbsTimer()
 {
     NS_LOG_LOGIC("RBS Timer expires");
 
     if(aqm->GetQueueSize() != 0){
         DoReportBufferStatus();
-        m_rbsTimer = Simulator::Schedule(MilliSeconds(10), &NrRlcUm::ExpireRbsTimer, this);
+        m_rbsTimer = Simulator::Schedule(MilliSeconds(10), &NrRlcUmDualpi2::ExpireRbsTimer, this);
     }
 }
 

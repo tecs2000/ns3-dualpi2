@@ -176,22 +176,15 @@ NrPdcp::DoTransmitPdcpSdu(NrPdcpSapProvider::TransmitPdcpSduParameters params)
     p->PeekHeader(ipv4Header);
     uint8_t ecn = ipv4Header.GetEcn();
 
-    if(ecn == Ipv4Header::ECN_ECT1 || ecn == Ipv4Header::ECN_CE){
+    if(ecn == Ipv4Header::ECN_ECT1 || ecn == Ipv4Header::ECN_CE)
         pdcpHeader.SetEct(1); // ecn capable. only one bit can be used at the header
-        NS_LOG_INFO("PDCP " << this << " received a L4S packet");
-
-    } else {
-        NS_LOG_INFO("PDCP " << this << " received a Classic packet");
-    }
 
     p->AddHeader(pdcpHeader);
     p->AddByteTag(pdcpTag, 1, pdcpHeader.GetSerializedSize());
     
     m_txSequenceNumber++;
     if (m_txSequenceNumber > m_maxPdcpSn)
-    {
         m_txSequenceNumber = 0;
-    }
 
     m_txPdu(m_rnti, m_lcid, p->GetSize());
 

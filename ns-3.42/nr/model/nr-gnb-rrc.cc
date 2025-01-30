@@ -21,7 +21,8 @@
 #include "nr-radio-bearer-info.h"
 #include "nr-rlc-am.h"
 #include "nr-rlc-tm.h"
-#include "nr-rlc-um.h"
+// #include "nr-rlc-um.h"
+#include "nr-rlc-um-dualpi2.h"
 #include "nr-rlc.h"
 
 #include <ns3/abort.h>
@@ -936,7 +937,7 @@ NrUeManager::SendPacket(uint8_t bid, Ptr<Packet> p)
         if (bearerInfo)
         {
             NrPdcpSapProvider* pdcpSapProvider = bearerInfo->m_pdcp->GetNrPdcpSapProvider();
-            NS_LOG_INFO("gNB RRC forwarding a " << (l4s ? "L4S" : "Classic") << " packet to "<< pdcpSapProvider << " PDCP layer");
+            NS_LOG_DEBUG("gNB RRC forwarding a " << (l4s ? "L4S" : "Classic") << " packet to "<< pdcpSapProvider << " PDCP layer");
             pdcpSapProvider->TransmitPdcpSdu(params);
         }
     }
@@ -3199,7 +3200,7 @@ NrGnbRrc::GetRlcType(NrEpsBearer bearer)
         return NrRlcSm::GetTypeId();
 
     case RLC_UM_ALWAYS:
-        return NrRlcUm::GetTypeId();
+        return NrRlcUmDualpi2::GetTypeId(); // change to NrLrcUm to disable dualPi2
 
     case RLC_AM_ALWAYS:
         return NrRlcAm::GetTypeId();
@@ -3207,7 +3208,7 @@ NrGnbRrc::GetRlcType(NrEpsBearer bearer)
     case PER_BASED:
         if (bearer.GetPacketErrorLossRate() > 1.0e-5)
         {
-            return NrRlcUm::GetTypeId();
+            return NrRlcUmDualpi2::GetTypeId(); // change to NrLrcUm to disable dualPi2
         }
         else
         {
