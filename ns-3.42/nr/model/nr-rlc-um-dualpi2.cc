@@ -6,13 +6,13 @@
 
 #include "nr-rlc-um-dualpi2.h"
 
+#include "nr-pdcp-header.h"
 #include "nr-rlc-header.h"
 #include "nr-rlc-sdu-status-tag.h"
 #include "nr-rlc-tag.h"
-#include "nr-pdcp-header.h"
 
-#include "ns3/ipv4-l3-protocol.h"
 #include "ns3/ipv4-header.h"
+#include "ns3/ipv4-l3-protocol.h"
 #include "ns3/log.h"
 #include "ns3/object.h"
 #include "ns3/simulator.h"
@@ -25,30 +25,34 @@ NS_LOG_COMPONENT_DEFINE("NrRlcUmDualpi2");
 NS_OBJECT_ENSURE_REGISTERED(NrRlcUmDualpi2);
 
 NrRlcUmDualpi2::NrRlcUmDualpi2()
-    : m_maxAqmBufferSize(10 * 1024),
-      m_aqmBufferSize(0),
+    : m_maxAqmSizeBytes(10 * 1024),
       m_sequenceNumber(0),
       m_vrUr(0),
       m_vrUx(0),
       m_vrUh(0),
       m_windowSize(512),
-      m_expectedSeqNumber(0)
+      m_expectedSeqNumber(0),
+      m_macOpportuntyCurrTime(Time(0)),
+      m_macOpportuntyOldTime(Time(0)),
+      m_aqmDrops(0)
 {
     NS_LOG_FUNCTION(this);
     aqm = CreateObject<DualQCoupledPiSquareQueueDisc>();
-    aqm->SetQueueLimit(10); // set to 10 in accordance to m_maxAqmBufferSize
     aqm->Initialize();
     m_reassemblingState = WAITING_S0_FULL;
+
+    std::string rlc_ref = std::to_string(reinterpret_cast<uintptr_t>(this));
+    std::string filename = "dualpi2-metrics-" + rlc_ref + ".log";
+    outfile.open(filename, std::ios::app); // Open in append mode to avoid overwriting
+    ExportQueueDelay(outfile);
 }
 
 NrRlcUmDualpi2::~NrRlcUmDualpi2()
 {
     NS_LOG_FUNCTION(this);
-    
-    uint32_t aqmDrops = aqm->GetStats().forcedDrop + aqm->GetStats().unforcedClassicDrop;
-    uint32_t aqmMarks = aqm->GetStats().unforcedClassicMark + aqm->GetStats().unforcedL4SMark;
-    
-    NS_LOG_INFO("RLC Dualpi2 AQM stats\n  Drops: " << aqmDrops << "\n  Marks: " << aqmMarks);
+
+    ExportQueueDelay(outfile);
+    outfile.close();
 }
 
 TypeId
@@ -61,8 +65,8 @@ NrRlcUmDualpi2::GetTypeId()
             .AddConstructor<NrRlcUmDualpi2>()
             .AddAttribute("MaxTxBufferSize",
                           "Maximum Size of the Transmission Buffer (in Bytes)",
-                          UintegerValue(10 * 1024), // 10 pkts of 1024 bytes
-                          MakeUintegerAccessor(&NrRlcUmDualpi2::m_maxAqmBufferSize),
+                          UintegerValue(10 * 1024),
+                          MakeUintegerAccessor(&NrRlcUmDualpi2::m_maxAqmSizeBytes),
                           MakeUintegerChecker<uint32_t>())
             .AddAttribute("ReorderingTimer",
                           "Value of the t-Reordering timer (See section 7.3 of 3GPP TS 36.322)",
@@ -107,7 +111,7 @@ NrRlcUmDualpi2::isL4S(Ptr<Packet> packet)
     {
         if (pdcpHeader.GetEct() == 1)
             return true;
-        
+
         return false;
     }
     std::cout << "NrPdcpHeader not found" << std::endl;
@@ -118,31 +122,32 @@ void
 NrRlcUmDualpi2::DoTransmitPdcpPdu(Ptr<Packet> p)
 {
     NS_LOG_FUNCTION(this << m_rnti << (uint32_t)m_lcid << p->GetSize());
-
-    int aqmBytes = aqm->GetQueueSize();
-    if (aqmBytes + p->GetSize() <= m_maxAqmBufferSize)
+    bool discarded = false;
+    if (aqm->GetQueueSizeBytes() + p->GetSize() <= m_maxAqmSizeBytes)
     {
         if (m_enablePdcpDiscarding)
         {
-            // discart the packet
             uint32_t headOfLineDelayInMs = 0;
             uint32_t discardTimerMs =
                 (m_discardTimerMs > 0) ? m_discardTimerMs : m_packetDelayBudgetMs;
 
-            if (aqmBytes > 0)
+            if (aqm->GetQueueSize() > 0)
                 headOfLineDelayInMs = (Simulator::Now() - aqm->GetQueueDelay()).GetMilliSeconds();
 
             NS_LOG_DEBUG("head of line delay in MS:" << headOfLineDelayInMs);
             if (headOfLineDelayInMs > discardTimerMs)
             {
+                discarded = true;
                 NS_LOG_INFO("Tx HOL is higher than this packet can allow. RLC SDU discarded");
                 NS_LOG_DEBUG("headOfLineDelayInMs   = " << headOfLineDelayInMs);
                 NS_LOG_DEBUG("m_packetDelayBudgetMs = " << m_packetDelayBudgetMs);
                 NS_LOG_DEBUG("packet size           = " << p->GetSize());
                 m_txDropTrace(p);
-                return;
+                ++m_aqmDrops;
             }
-            
+        }
+        if (!discarded)
+        {
             /** Store PDCP PDU */
             NS_LOG_INFO("Adding RLC SDU to aqm after adding NrRlcSduStatusTag: FULL_SDU");
 
@@ -165,7 +170,6 @@ NrRlcUmDualpi2::DoTransmitPdcpPdu(Ptr<Packet> p)
                 item = Create<DualQueueClassicQueueDiscItem>(p, dest, 0);
             }
 
-            item->SetTimeStamp(Simulator::Now());
             aqm->Enqueue(item);
 
             NS_LOG_LOGIC("packets in the AQM buffer  = " << aqm->GetQueueSize());
@@ -176,10 +180,11 @@ NrRlcUmDualpi2::DoTransmitPdcpPdu(Ptr<Packet> p)
     {
         // Discard full RLC SDU
         NS_LOG_INFO("AQM buffer is full. RLC SDU discarded");
-        NS_LOG_LOGIC("MaxTxBufferSize  = " << m_maxAqmBufferSize);
+        NS_LOG_LOGIC("MaxTxBufferSize  = " << m_maxAqmSizeBytes);
         NS_LOG_LOGIC("aqmBufferSize    = " << aqm->GetQueueSizeBytes());
         NS_LOG_LOGIC("packet size      = " << p->GetSize());
         m_txDropTrace(p);
+        ++m_aqmDrops;
     }
 
     /** Report Buffer Status */
@@ -199,7 +204,12 @@ NrRlcUmDualpi2::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOp
                 << txOpParams.bytes << " bytes for RNTI=" << m_rnti << ", LCID=" << (uint32_t)m_lcid
                 << ", CCID=" << (uint32_t)txOpParams.componentCarrierId << ", HARQ ID="
                 << (uint32_t)txOpParams.harqId << ", MIMO Layer=" << (uint32_t)txOpParams.layer);
-
+    
+    m_macOpportuntyOldTime = m_macOpportuntyCurrTime; // last time sending packets to mac
+    m_macOpportuntyCurrTime = Simulator::Now();       // current time sending packets to mac
+    m_lastMacOpportunity = txOpParams.bytes;
+    m_queueSizeWhenMacOpportunity = aqm->GetQueueSizeBytes();
+                
     if (txOpParams.bytes <= 2)
     {
         // Stingy MAC: Header fix part is 2 bytes, we need more bytes for the data
@@ -216,15 +226,17 @@ NrRlcUmDualpi2::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOp
     uint32_t aqmNextSegmentId = 1;
     uint32_t aqmDataFieldAddedSize = 0;
     std::vector<Ptr<Packet>> aqmDataField;
-
-    if (aqm->GetQueueSize() == 0){
+    
+    if (aqm->GetQueueSize() == 0)
+    {
         NS_LOG_LOGIC("No data pending in the AQM, skipping...");
         return;
     }
-
+    
     NS_LOG_LOGIC("SDUs in the AQM  = " << aqm->GetQueueSize());
 
     Ptr<QueueDiscItem> aqmItem = aqm->Dequeue();
+
     l4s = aqmItem->IsL4S();
     aqmFirstSegment = aqmItem->GetPacket();
     aqmFirstSegmentTime = aqmItem->GetTimeStamp();
@@ -294,6 +306,7 @@ NrRlcUmDualpi2::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOp
                     item = Create<DualQueueClassicQueueDiscItem>(aqmFirstSegment, dest, 0);
 
                 itemSize = item->GetSize();
+
                 aqm->Requeue(item);
 
                 NS_LOG_LOGIC("    AQM: Give back the remaining segment");
@@ -365,29 +378,27 @@ NrRlcUmDualpi2::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOp
         else // (aqmFirstSegment->GetSize () < aqmNextSegmentSize) && (aqm->GetQueueSize() > 0)
         {
             NS_LOG_LOGIC("    IF aqmFirstSegment < NextSegmentSize && aqm->GetQueueSize() > 0");
+
             // Add txBuffer.FirstBuffer to DataField
             aqmDataFieldAddedSize = aqmFirstSegment->GetSize();
             aqmDataField.push_back(aqmFirstSegment);
 
-            // ExtensionBit (Next_Segment - 1) = 1
-            aqmRlcHeader.PushExtensionBit(NrRlcHeader::E_LI_FIELDS_FOLLOWS);
-
-            // LengthIndicator (Next_Segment)  = txBuffer.FirstBuffer.length()
+            // LengthIndicator (Next_Segment) = txBuffer.FirstBuffer.length()
             aqmRlcHeader.PushLengthIndicator(aqmFirstSegment->GetSize());
 
             aqmNextSegmentSize -= ((aqmNextSegmentId % 2) ? (2) : (1)) + aqmDataFieldAddedSize;
             aqmNextSegmentId++;
 
-            NS_LOG_LOGIC("        SDUs in AQM  = " << aqm->GetQueueSize());
-            NS_LOG_LOGIC("        Next segment size = " << aqmNextSegmentSize);
-            NS_LOG_LOGIC("        Remove SDU from AQM");
-
             // (more segments)
             Ptr<QueueDiscItem> aqmItem = aqm->Dequeue();
+
+            aqmRlcHeader.PushExtensionBit(NrRlcHeader::E_LI_FIELDS_FOLLOWS);
             aqmFirstSegment = aqmItem->GetPacket();
             aqmFirstSegmentTime = aqmItem->GetTimeStamp();
 
-            NS_LOG_LOGIC("        aqmBufferSize = " << aqm->GetQueueSize());
+            NS_LOG_LOGIC("        SDUs in AQM  = " << aqm->GetQueueSize());
+            NS_LOG_LOGIC("        Next segment size = " << aqmNextSegmentSize);
+            NS_LOG_LOGIC("        Remove SDU from AQM");
         }
     }
 
@@ -464,7 +475,7 @@ NrRlcUmDualpi2::DoNotifyTxOpportunity(NrMacSapUser::TxOpportunityParameters txOp
     NS_LOG_INFO("Forward RLC Dualpi2 PDU to MAC Layer");
     m_macSapProvider->TransmitPdu(params);
 
-    if (aqm->GetQueueSize() != 0)
+    if (aqm->GetQueueSize() > 0)
     {
         m_rbsTimer.Cancel();
         m_rbsTimer = Simulator::Schedule(MilliSeconds(10), &NrRlcUmDualpi2::ExpireRbsTimer, this);
@@ -637,8 +648,9 @@ NrRlcUmDualpi2::DoReceivePdu(NrMacSapUser::ReceivePduParameters rxPduParams)
         {
             NS_LOG_LOGIC("VR(UH) > VR(UR)");
             NS_LOG_LOGIC("Start reordering timer");
-            m_reorderingTimer =
-                Simulator::Schedule(m_reorderingTimerValue, &NrRlcUmDualpi2::ExpireReorderingTimer, this);
+            m_reorderingTimer = Simulator::Schedule(m_reorderingTimerValue,
+                                                    &NrRlcUmDualpi2::ExpireReorderingTimer,
+                                                    this);
             m_vrUx = m_vrUh;
             NS_LOG_LOGIC("New VR(UX) = " << m_vrUx);
         }
@@ -1174,7 +1186,8 @@ NrRlcUmDualpi2::ReassembleOutsideWindow()
 }
 
 void
-NrRlcUmDualpi2::ReassembleSnInterval(nr::SequenceNumber10 lowSeqNumber, nr::SequenceNumber10 highSeqNumber)
+NrRlcUmDualpi2::ReassembleSnInterval(nr::SequenceNumber10 lowSeqNumber,
+                                     nr::SequenceNumber10 highSeqNumber)
 {
     NS_LOG_LOGIC("Reassemble SN between " << lowSeqNumber << " and " << highSeqNumber);
 
@@ -1208,7 +1221,7 @@ NrRlcUmDualpi2::DoReportBufferStatus()
     uint32_t queueSize = 0;
 
     int aqmCurrSize = aqm->GetQueueSizeBytes();
-    if (aqmCurrSize != 0)
+    if (aqm->GetQueueSize() > 0)
     {
         holDelay = Simulator::Now() - aqm->GetQueueDelay();
 
@@ -1261,8 +1274,9 @@ NrRlcUmDualpi2::ExpireReorderingTimer()
     if (m_vrUh > m_vrUr)
     {
         NS_LOG_LOGIC("Start reordering timer");
-        m_reorderingTimer =
-            Simulator::Schedule(m_reorderingTimerValue, &NrRlcUmDualpi2::ExpireReorderingTimer, this);
+        m_reorderingTimer = Simulator::Schedule(m_reorderingTimerValue,
+                                                &NrRlcUmDualpi2::ExpireReorderingTimer,
+                                                this);
         m_vrUx = m_vrUh;
         NS_LOG_LOGIC("New VR(UX) = " << m_vrUx);
     }
@@ -1273,10 +1287,40 @@ NrRlcUmDualpi2::ExpireRbsTimer()
 {
     NS_LOG_LOGIC("RBS Timer expires");
 
-    if(aqm->GetQueueSize() != 0){
+    if (aqm->GetQueueSize() > 0)
+    {
         DoReportBufferStatus();
         m_rbsTimer = Simulator::Schedule(MilliSeconds(10), &NrRlcUmDualpi2::ExpireRbsTimer, this);
     }
+}
+
+void
+NrRlcUmDualpi2::ExportQueueDelay(std::ofstream& outfile) // Pass by reference
+{
+    NS_LOG_INFO("Exporting current queue delay to file");
+
+    Time qdelay = aqm->GetQueueDelay();
+    if(!qdelay.IsZero())
+        qdelay = Simulator::Now() - aqm->GetQueueDelay();
+    
+    uint32_t aqmMarks = aqm->GetStats().unforcedClassicMark + aqm->GetStats().unforcedL4SMark;
+    uint32_t totalDrops = m_aqmDrops + aqm->GetStats().unforcedClassicDrop + aqm->GetStats().forcedDrop;
+
+    outfile << "RLC Stats\n"
+            << "MAC credits: " << m_lastMacOpportunity << " bytes\n"
+            << "Queue size: " << m_queueSizeWhenMacOpportunity << " bytes\n"
+            << "Queue delay: " << qdelay.GetMilliSeconds() << " ms\n"
+            << "MAC delay: "
+            << (m_macOpportuntyCurrTime - m_macOpportuntyOldTime).GetMilliSeconds() << " ms\n"
+            << "Drops: " << totalDrops << " pkts\n"
+            << "Marks: " << aqmMarks << " pkts\n"
+            << std::endl;
+    
+    // Schedule the next call to ExportQueueDelay
+    Simulator::Schedule(MilliSeconds(5),
+                        &NrRlcUmDualpi2::ExportQueueDelay,
+                        this,
+                        std::ref(outfile));
 }
 
 } // namespace ns3

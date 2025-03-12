@@ -4,8 +4,8 @@
 //
 // Author: Manuel Requena <manuel.requena@cttc.es>
 
-#ifndef NR_RLC_UM_H
-#define NR_RLC_UM_H
+#ifndef NR_RLC_UM_DUALPI2_H
+#define NR_RLC_UM_DUALPI2_H
 
 #include "nr-rlc-sequence-number.h"
 #include "nr-rlc.h"
@@ -50,6 +50,7 @@ class NrRlcUmDualpi2 : public NrRlc
     void DoNotifyHarqDeliveryFailure() override;
     void DoReceivePdu(NrMacSapUser::ReceivePduParameters rxPduParams) override;
     static bool isL4S(ns3::Ptr<ns3::Packet> packet); ///< check if the packet is of L4S traffic
+    void ExportQueueDelay(std::ofstream &outfile); ///< exports queue delay stats to file
 
   private:
     /// Expire reordering timer
@@ -87,8 +88,7 @@ class NrRlcUmDualpi2 : public NrRlc
     void DoReportBufferStatus();
 
   private:
-    uint32_t m_maxAqmBufferSize; ///< maximum transmit buffer status
-    uint32_t m_aqmBufferSize;    ///< transmit buffer size
+    uint32_t m_maxAqmSizeBytes; ///< maximum transmit buffer status
 
     std::map<uint16_t, Ptr<Packet>> m_rxBuffer; ///< Reception buffer
     std::vector<Ptr<Packet>> m_reasBuffer;      ///< Reassembling buffer
@@ -137,12 +137,18 @@ class NrRlcUmDualpi2 : public NrRlc
      */
     nr::SequenceNumber10 m_expectedSeqNumber;
 
+    Time m_macOpportuntyCurrTime; // Variable to compute delay between MAC requests for packets transmission
+    Time m_macOpportuntyOldTime; // Variable to compute delay between MAC requests for packets transmission
+    uint32_t m_lastMacOpportunity; ///< Last MAC opportunity in bytes
+    uint32_t m_queueSizeWhenMacOpportunity; ///< Queue size when MAC opportunity was received
+
     /**
      * DualPi2 variables and functions
      */
     Address dest;                             ///< destination address
+    std::ofstream outfile;                    ///< destination filename to store queue delay logs
     Ptr<DualQCoupledPiSquareQueueDisc> aqm;   ///< Dual Queue Coupled PI Square queue disc
-
+    uint32_t m_aqmDrops;                      ///< AQM drops
 };
 
 } // namespace ns3
