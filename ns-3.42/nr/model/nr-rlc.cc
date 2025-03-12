@@ -180,6 +180,11 @@ NrRlc::GetNrMacSapUser()
     return m_macSapUser;
 }
 
+void
+NrRlc::SetGnbAssociation(){
+    m_gnbAssociated = 1;
+}
+
 ////////////////////////////////////////
 
 NS_OBJECT_ENSURE_REGISTERED(NrRlcSm);

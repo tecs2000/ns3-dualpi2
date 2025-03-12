@@ -21,7 +21,7 @@
 #include "nr-radio-bearer-info.h"
 #include "nr-rlc-am.h"
 #include "nr-rlc-tm.h"
-// #include "nr-rlc-um.h"
+#include "nr-rlc-um.h"
 #include "nr-rlc-um-dualpi2.h"
 #include "nr-rlc.h"
 
@@ -422,15 +422,20 @@ NrUeManager::SetupDataRadioBearer(NrEpsBearer bearer,
     }
 
     TypeId rlcTypeId = m_rrc->GetRlcType(bearer);
-
+    
     ObjectFactory rlcObjectFactory;
     rlcObjectFactory.SetTypeId(rlcTypeId);
     Ptr<NrRlc> rlc = rlcObjectFactory.Create()->GetObject<NrRlc>();
     rlc->SetNrMacSapProvider(m_rrc->m_macSapProvider);
     rlc->SetRnti(m_rnti);
     rlc->SetPacketDelayBudgetMs(bearer.GetPacketDelayBudgetMs());
-
+    
     drbInfo->m_rlc = rlc;
+    
+    if(rlcTypeId == NrRlcUm::GetTypeId()){
+        NS_LOG_INFO("Setting GNB Association for RLC UM " << std::to_string(reinterpret_cast<uintptr_t>(this)));
+        rlc->SetGnbAssociation();
+    }
 
     rlc->SetLcId(lcid);
 
@@ -3200,7 +3205,8 @@ NrGnbRrc::GetRlcType(NrEpsBearer bearer)
         return NrRlcSm::GetTypeId();
 
     case RLC_UM_ALWAYS:
-        return NrRlcUmDualpi2::GetTypeId(); // change to NrLrcUm to disable dualPi2
+        return NrRlcUm::GetTypeId(); // change to NrLrcUm to disable dualPi2
+        // return NrRlcUmDualpi2::GetTypeId(); // change to NrLrcUm to disable dualPi2
 
     case RLC_AM_ALWAYS:
         return NrRlcAm::GetTypeId();
@@ -3208,7 +3214,8 @@ NrGnbRrc::GetRlcType(NrEpsBearer bearer)
     case PER_BASED:
         if (bearer.GetPacketErrorLossRate() > 1.0e-5)
         {
-            return NrRlcUmDualpi2::GetTypeId(); // change to NrLrcUm to disable dualPi2
+            return NrRlcUm::GetTypeId(); // change to NrLrcUm to disable dualPi2
+            // return NrRlcUmDualpi2::GetTypeId(); // change to NrLrcUm to disable dualPi2
         }
         else
         {

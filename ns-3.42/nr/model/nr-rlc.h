@@ -96,6 +96,8 @@ class NrRlc : public Object // SimpleRefCount<NrRlc>
      */
     NrMacSapUser* GetNrMacSapUser();
 
+    void SetGnbAssociation();     ///< sets the gNB association to diferentiate from rlc um in ue
+
     /**
      * TracedCallback signature for NotifyTxOpportunity events.
      *
@@ -180,6 +182,8 @@ class NrRlc : public Object // SimpleRefCount<NrRlc>
      * transmission.
      */
     TracedCallback<Ptr<const Packet>> m_txDropTrace;
+
+    bool m_gnbAssociated = 0;
 };
 
 /**
