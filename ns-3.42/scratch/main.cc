@@ -1,148 +1,291 @@
 #include "ns3/applications-module.h"
-#include "ns3/config-store.h"
-#include "ns3/core-module.h"
-#include "ns3/internet-module.h"
-#include "ns3/ipv4-flow-classifier.h"
-#include "ns3/ipv4-global-routing-helper.h"
-#include "ns3/lte-helper.h"
-#include "ns3/lte-module.h"
-#include "ns3/mobility-module.h"
+#include "ns3/buildings-module.h"
+#include "ns3/config-store-module.h"
 #include "ns3/netanim-module.h"
-#include "ns3/network-module.h"
-#include <ns3/flow-monitor-helper.h>
-#include <ns3/flow-monitor.h>
-#include <ns3/point-to-point-helper.h>
+#include "ns3/core-module.h"
+#include "ns3/flow-monitor-module.h"
+#include "ns3/internet-apps-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/mobility-module.h"
+#include "ns3/nr-module.h"
+#include "ns3/eps-bearer.h"
+#include "ns3/point-to-point-module.h"
 
-#include <iostream>
-#include <random>
+/** -------------- Topology --------------
+ *                                      -- cubic remoteHost 
+ * ue -   |--- gnB ---|--- pgw ---| --- |
+ *                                      -- dctcp remoteHost
+ */
 
-#define CVM ConstantVelocityMobilityModel
+#define VelocityModel ConstantVelocityMobilityModel
 
 using namespace ns3;
 
-NodeContainer ues;
-NodeContainer eNBs;
+NodeContainer uesContainer;
+NodeContainer gnbContainer;
 NodeContainer remoteHosts;
+
 Ptr<Node> pgw;
 Ptr<Node> sgw;
-Ptr<Node> remoteHost;
+Ptr<Node> remoteHost1;
+Ptr<Node> remoteHost2;
 
-// cmd line variables
-int nUE=5;
-int aqm = 0;
-int baseDistance=2500;
-int baseDelay = 50; // ms
-int printNetStats = 0;
+int numberUes;
+int numberGnbs;
+int numberRemoteHosts;
 
-// enb related variables
-int nENBs;
-int maxDistance = baseDistance + 2500; // radius
-double enbX = 2500.0;
-double enbY = 2500.0;
+int duration = 10;
+double enbX = 225.0;
+double enbY = 225.0;
+double radius = 600;
 
-int nRemoteHosts;
-int duration = 20;
+Time simTime = Seconds(10);
 
 Ptr<UniformRandomVariable> uRand = CreateObject<UniformRandomVariable>();
 
-Ptr<LteHelper> lte;
-Ptr<PointToPointEpcHelper> core;
+Ptr<NrHelper> nrHelper;
+Ptr<NrPointToPointEpcHelper> core;
 
-void setMobility();
-void createRouteUEsRemoteHost();
-void ScheduleCheckCourse(Ptr<MobilityModel> mobility);
-void CheckCourse(std::string context, Ptr<MobilityModel> mobility);
-void printStats(Ptr<FlowMonitor> monitor,
-                FlowMonitorHelper& flowmon,
-                Ipv4InterfaceContainer& uesIPs,
-                Ipv4InterfaceContainer& internetIPs);
+void NotifyCqiReport(std::string context, uint16_t cellId, uint16_t rnti, uint8_t cqi);
+void SetMobility();
+void CheckCourse(std::string context, Ptr<MobilityModel> mob);
+void BuildApps(Ipv4InterfaceContainer& ueIps, uint32_t numUes);
 
-NS_LOG_COMPONENT_DEFINE("LtePDCPCqi");
+NS_LOG_COMPONENT_DEFINE("Temp");
 
 int
 main(int argc, char* argv[])
 {
-    LogComponentEnable("LtePdcp", LOG_LEVEL_FUNCTION);
-    LogComponentEnable("UdpEchoServerApplication", LOG_LEVEL_INFO);
-    LogComponentEnable("UdpEchoClientApplication", LOG_LEVEL_INFO);
 
-    CommandLine cmd;
-    cmd.AddValue("nUE", "n of user equipment", nUE);
-    cmd.AddValue("stats", "print network stats", printNetStats);
-    cmd.AddValue("base-dist", "the minimal distance an UE can be placed from the eNB", baseDistance);
-    cmd.AddValue("base-delay", "the base delay between the core and the remote host", baseDelay);
+    // LogComponentEnable("NrRlcUmDualpi2", LOG_LEVEL_INFO);
+    LogComponentEnable("NrRlcUm", LOG_LEVEL_INFO);
+    // LogComponentEnable("DualQCoupledPiSquareQueueDisc", LOG_LEVEL_INFO);
+    // LogComponentEnable("DualQCoupledPiSquareQueueDisc", LOG_LEVEL_FUNCTION);
+    // LogComponentEnable("QueueDisc", LOG_LEVEL_INFO);
+    // LogComponentEnable("QueueDisc", LOG_LEVEL_FUNCTION);
+    // LogComponentEnable("TcpDctcp", LOG_LEVEL_ALL);
+    // LogComponentEnable("TcpCubic", LOG_LEVEL_ALL);
 
-    cmd.Parse(argc, argv);
+    numberGnbs = 1;
+    numberUes = 10;
+    numberRemoteHosts = 2;
 
-    nENBs = 1;
-    nRemoteHosts = 1;
+    NS_LOG_INFO("Creating " << numberGnbs << " gNBs" <<
+                " and " << numberUes << " UEs" << 
+                " and " << numberRemoteHosts << " remote hosts");
+        
+    remoteHosts.Create(numberRemoteHosts);
+    uesContainer.Create(numberUes);
+    gnbContainer.Create(numberGnbs);
 
-    ues.Create(nUE);
-    eNBs.Create(nENBs);
-    remoteHosts.Create(nRemoteHosts);
+    for (int i = 0; i < numberUes; i++)
+        NS_LOG_DEBUG("UE " << i << " -> " << uesContainer.Get(i)->GetId());
 
-    lte = CreateObject<LteHelper>(); // uses FriisPropagationLossModel as default
-    core = CreateObject<PointToPointEpcHelper>();
+    for (int i = 0; i < numberGnbs; i++)
+        NS_LOG_DEBUG("gNB " << i << " -> " << gnbContainer.Get(i)->GetId());
 
-    lte->SetEpcHelper(core);
+    for (int i = 0; i < numberRemoteHosts; i++)
+        NS_LOG_DEBUG("remoteHost " << i << " -> " << remoteHosts.Get(i)->GetId());
+
+    uint16_t numerology = 0;
+    double centralFrequency = 4e9;
+    double bandwidth = 10e6;
+    double total = 10;
+    int64_t randomStream = 1;
+
+    // Where we will store the output files.
+    std::string simTag = "default-" + std::to_string(numberUes);
+    std::string outputDir = "./";
+
+    nrHelper = CreateObject<NrHelper>();
+    core = CreateObject<NrPointToPointEpcHelper>();
+    nrHelper->SetEpcHelper(core);
+
+    // Selecting MAC scheduler (implicit default has a bug!)
+    nrHelper->SetSchedulerTypeId(TypeId::LookupByName("ns3::NrMacSchedulerTdmaRR"));
+    Config::SetDefault("ns3::TcpSocketBase::UseEcn", StringValue("On"));
 
     pgw = core->GetPgwNode();
     sgw = core->GetSgwNode();
-    remoteHost = remoteHosts.Get(0);
+    remoteHost1 = remoteHosts.Get(0);
+    remoteHost2 = remoteHosts.Get(1);
 
-    setMobility();
+    SetMobility();
 
-    NetDeviceContainer eNBsDevs = lte->InstallEnbDevice(eNBs);
-    NetDeviceContainer UEsDevs = lte->InstallUeDevice(ues);
+    BandwidthPartInfoPtrVector allBwps;
+    CcBwpCreator ccBwpCreator;
+    const uint8_t numCcPerBand = 1; 
 
-    PointToPointHelper p2p;
-    p2p.SetDeviceAttribute("DataRate", DataRateValue(DataRate("100Gb/s")));
-    p2p.SetChannelAttribute("Delay", TimeValue(MilliSeconds(baseDelay)));
+    auto bandMask = NrHelper::INIT_PROPAGATION | NrHelper::INIT_CHANNEL;
 
-    NetDeviceContainer internetDevices = p2p.Install(pgw, remoteHost);
+    // Create the configuration for the CcBwpHelper. SimpleOperationBandConf creates
+    // a single BWP per CC
+    CcBwpCreator::SimpleOperationBandConf bandConf (centralFrequency,
+                                                    bandwidth,
+                                                    numCcPerBand,
+                                                    BandwidthPartInfo::UMa);
+
+    bandConf.m_numBwp = 1;
+
+    // By using the configuration created, it is time to make the operation band
+    OperationBandInfo band = ccBwpCreator.CreateOperationBandContiguousCc(bandConf);
+
+    /*
+     * The configured spectrum division is:
+     * ------------Band1--------------|
+     * ------------CC1----------------|
+     * ------------BWP1---------------|
+     */
+
+    nrHelper->InitializeOperationBand(&band, bandMask);
+    allBwps = CcBwpCreator::GetAllBwps({band});
+
+    Packet::EnableChecking();
+    Packet::EnablePrinting();
+
+    /*
+     * We have configured the attributes we needed. Now, install and get the 
+     * pointers to the NetDevices, which contains all the NR stack:
+     */
+
+    NetDeviceContainer gnbNetDev =
+        nrHelper->InstallGnbDevice(gnbContainer, allBwps);
+    NetDeviceContainer ueNetDev = 
+        nrHelper->InstallUeDevice(uesContainer, allBwps);
+
+    randomStream += nrHelper->AssignStreams(gnbNetDev, randomStream);
+    randomStream += nrHelper->AssignStreams(ueNetDev, randomStream);
+
+    // Get the first netdevice (enbNetDev.Get (0)) and the first bandwidth part (0)
+    // and set the attribute.
+    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+        ->SetAttribute("Numerology", UintegerValue(numerology));
+    nrHelper->GetGnbPhy(gnbNetDev.Get(0), 0)
+        ->SetAttribute("TxPower", DoubleValue(total));
+
+    // When all the configuration is done, explicitly call UpdateConfig ()
+    for (auto it = gnbNetDev.Begin(); it != gnbNetDev.End(); ++it)
+        DynamicCast<NrGnbNetDevice>(*it)->UpdateConfig();
+
+    for (auto it = ueNetDev.Begin(); it != ueNetDev.End(); ++it)
+        DynamicCast<NrUeNetDevice>(*it)->UpdateConfig();
 
     InternetStackHelper internet;
     internet.Install(remoteHosts);
-    internet.Install(ues);
+
+    // connect the remoteHosts to pgw. Setup routing too
+    PointToPointHelper p2ph;
+    p2ph.SetDeviceAttribute("DataRate", DataRateValue(DataRate("10Gb/s")));
+    p2ph.SetDeviceAttribute("Mtu", UintegerValue(2500));
+    p2ph.SetChannelAttribute("Delay", TimeValue(Seconds(0.005)));
+
+    NetDeviceContainer internetDevices1 = p2ph.Install(pgw, remoteHost1);
+    NetDeviceContainer internetDevices2 = p2ph.Install(pgw, remoteHost2);
 
     Ipv4AddressHelper ipv4h;
+    Ipv4StaticRoutingHelper ipv4RoutingHelper;
+
     ipv4h.SetBase("1.0.0.0", "255.0.0.0");
-    Ipv4InterfaceContainer internetIPs = ipv4h.Assign(internetDevices);
+    Ipv4InterfaceContainer internetIpIfaces1 = ipv4h.Assign(internetDevices1);
 
-    Ipv4InterfaceContainer uesIPs = core->AssignUeIpv4Address(UEsDevs);
+    ipv4h.SetBase("2.0.0.0", "255.0.0.0");
+    Ipv4InterfaceContainer internetIpIfaces2 = ipv4h.Assign(internetDevices2);
 
-    lte->Attach(UEsDevs, eNBsDevs.Get(0));
+    Ptr<Ipv4StaticRouting> remoteHostStaticRouting1 =
+        ipv4RoutingHelper.GetStaticRouting(remoteHost1->GetObject<Ipv4>());
+    remoteHostStaticRouting1->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
 
-    createRouteUEsRemoteHost();
+    Ptr<Ipv4StaticRouting> remoteHostStaticRouting2 = 
+        ipv4RoutingHelper.GetStaticRouting(remoteHost2->GetObject<Ipv4>());
+    remoteHostStaticRouting2->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
 
-    UdpEchoServerHelper echoServer(9);
+    internet.Install(uesContainer);
 
-    ApplicationContainer serverApps = echoServer.Install(remoteHost);
+    Ipv4InterfaceContainer ueIpIface = core->AssignUeIpv4Address(ueNetDev);
 
-    serverApps.Start(Seconds(4.0));
-    serverApps.Stop(Seconds(20.0));
+    // Set the default gateway for the UEs
+    for (uint32_t j = 0; j < uesContainer.GetN(); ++j)
+    {
+        Ptr<Ipv4StaticRouting> ueStaticRouting = ipv4RoutingHelper.GetStaticRouting(
+            uesContainer.Get(j)->GetObject<Ipv4>());
+        ueStaticRouting->SetDefaultRoute(core->GetUeDefaultGatewayAddress(), 1);
+    }
 
-    Ipv4Address remoteHostAddr = internetIPs.GetAddress(1, 0);
+    // attach UEs to the closest gnb
+    nrHelper->AttachToClosestGnb(ueNetDev, gnbNetDev);
 
-    UdpEchoClientHelper echoClient(remoteHostAddr, 9);
+    // //pcap files and debug for nodeList
+    // internet.EnablePcapIpv4("debugUe", uesContainer);
 
-    echoClient.SetAttribute("MaxPackets", UintegerValue(1000));
-    echoClient.SetAttribute("Interval", TimeValue(Seconds(1.0)));
-    echoClient.SetAttribute("PacketSize", UintegerValue(1024));
+    // ---------------------------- Application ----------------------------
 
-    ApplicationContainer clientApps = echoClient.Install(ues);
+    BuildApps(ueIpIface, numberUes);
 
-    clientApps.Start(Seconds(4.0));
-    clientApps.Stop(Seconds(14.0));
+    // ---------------------------- Tracing ----------------------------
 
-    FlowMonitorHelper flowmon;
-    Ptr<FlowMonitor> monitor = flowmon.InstallAll();
+    // Config::Connect("/NodeList/*/DeviceList/*/$ns3::NrGnbNetDevice/BandwidthPartMap/*/NrGnbPhy/ReportCqiValues",
+    //                 MakeCallback(&NotifyCqiReport));
 
-    Simulator::Stop(Seconds(duration));
+    // ---------------------------- Flow Monitor ----------------------------
+
+    FlowMonitorHelper flowmonHelper;
+    NodeContainer endpointNodes;
+    endpointNodes.Add(remoteHost1);
+    endpointNodes.Add(remoteHost2);
+    endpointNodes.Add(uesContainer);
+
+    Ptr<ns3::FlowMonitor> monitor = flowmonHelper.Install(endpointNodes);
+    monitor->SetAttribute("DelayBinWidth", DoubleValue(0.001));
+    monitor->SetAttribute("JitterBinWidth", DoubleValue(0.001));
+    monitor->SetAttribute("PacketSizeBinWidth", DoubleValue(20));
+
+    Simulator::Stop(simTime);
     Simulator::Run();
 
-    if (printNetStats)
-        printStats(monitor, flowmon, uesIPs, internetIPs);
+    // Print per-flow statistics
+    monitor->CheckForLostPackets();
+    Ptr<Ipv4FlowClassifier> classifier =
+        DynamicCast<Ipv4FlowClassifier>(flowmonHelper.GetClassifier());
+    FlowMonitor::FlowStatsContainer stats = monitor->GetFlowStats();
+
+    std::ofstream outFile;
+    std::string filename = outputDir + "/" + simTag;
+    outFile.open(filename.c_str(), std::ofstream::out | std::ofstream::trunc);
+
+    if (!outFile.is_open())
+    {
+        std::cerr << "Can't open file " << filename << std::endl;
+        return 1;
+    }
+
+    outFile.setf(std::ios_base::fixed);
+
+    int j = 0;
+    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
+         i != stats.end();
+         ++i)
+    {
+        std::string histOutPath = "histogram-flow-" + std::to_string(j) + ".xml"; 
+        std::ofstream histOutFile(histOutPath);
+
+        Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
+        
+        outFile << "Flow " << i->first << " (" << t.sourceAddress << ":" << t.sourcePort << " -> "
+                << t.destinationAddress << ":" << t.destinationPort << ") - " << "\n";
+        outFile << "  Tx Packets: " << i->second.txPackets << "\n";
+        outFile << "  Rx Packets: " << i->second.rxPackets << "\n";
+        outFile << "  Throughput: " << i->second.rxBytes * 8.0 / simTime.GetSeconds() / 1024 / 1024
+                << " Mbps\n";
+        outFile << "  Average Delay: " 
+                << (i->second.rxPackets > 0 ? (i->second.delaySum.GetSeconds() / i->second.rxPackets) : 0)
+                << " s\n";
+
+        i->second.delayHistogram.SerializeToXmlStream(histOutFile, 2, "HistogramDelay");
+        
+        ++j;
+    }
+
+    outFile.close();
 
     Simulator::Destroy();
 
@@ -150,159 +293,110 @@ main(int argc, char* argv[])
 }
 
 void
-printStats(Ptr<FlowMonitor> monitor,
-           FlowMonitorHelper& flowmon,
-           Ipv4InterfaceContainer& uesIPs,
-           Ipv4InterfaceContainer& internetIPs)
+NotifyCqiReport(std::string context, uint16_t cellId, uint16_t rnti, uint8_t cqi)
 {
-    NS_LOG_INFO("PGW IPv4 Address: " << internetIPs.GetAddress(0));
-    NS_LOG_INFO("RemoteHost IPv4 Address: " << internetIPs.GetAddress(1));
-    NS_LOG_INFO("Default Gateway IPv4 Address: " << core->GetUeDefaultGatewayAddress());
-
-    std::vector<Ipv4Address> ues_ips;
-    for (int u = 0; u < nUE; ++u)
-    {
-        ues_ips.push_back(uesIPs.GetAddress(u));
-        NS_LOG_INFO("UE " << u << " ipaddr: " << uesIPs.GetAddress(u));
-    }
-
-    monitor->CheckForLostPackets();
-
-    Ptr<Ipv4FlowClassifier> classifier = DynamicCast<Ipv4FlowClassifier>(flowmon.GetClassifier());
-    FlowMonitor::FlowStatsContainer stats = monitor->GetFlowStats();
-    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
-         i != stats.end();
-         ++i)
-    {
-        Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow(i->first);
-
-        std::vector<Ipv4Address>::iterator it =
-            std::find(ues_ips.begin(), ues_ips.end(), t.sourceAddress);
-
-        // Plot only data related to the UE
-        if (it != ues_ips.end())
-        {
-            std::cout << "Flow ID " << i->first << " (" << t.sourceAddress << " -> "
-                      << t.destinationAddress << ")\n";
-
-            double timeTaken =
-                i->second.timeLastTxPacket.GetSeconds() - i->second.timeFirstTxPacket.GetSeconds();
-            double Throughput = i->second.txBytes * 8.0 / timeTaken / 1024 / 1024;
-
-            std::cout << "  Throughput (Mbps): " << Throughput << "\n";
-
-            std::cout << "  Tx Packets: " << i->second.txPackets << "\n";
-            std::cout << "  Tx Bytes:   " << i->second.txBytes << "\n";
-            std::cout << "  Rx Packets: " << i->second.rxPackets << "\n";
-            std::cout << "  Rx Bytes: " << i->second.rxBytes << "\n";
-            std::cout << "  Average Rx Packet Size: " << i->second.rxBytes / i->second.rxPackets
-                      << "\n";
-            std::cout << "  Average Tx Packet Size: " << i->second.txBytes / i->second.txPackets
-                      << "\n";
-            std::cout << "  Average Delay:  "
-                      << i->second.delaySum.GetSeconds() / i->second.rxPackets << " s\n";
-        }
-    }
+    NS_LOG_INFO(context << " - CQI report from UE " << rnti << " in cell " << cellId << ": " << +cqi);
 }
 
 void
-setMobility()
+SetMobility()
 {
-    uRand->SetAttribute("Min", DoubleValue(50.0));
-    uRand->SetAttribute("Max", DoubleValue(100.0));
-
-    MobilityHelper nodesMobility;
     MobilityHelper uesMobility;
+    MobilityHelper nodesMobility;
 
-    Ptr<ListPositionAllocator> PositionAlloc = CreateObject<ListPositionAllocator>();
+    Ptr<ListPositionAllocator> positionAlloc = CreateObject<ListPositionAllocator>();
 
-    PositionAlloc->Add(Vector(4000.0, 1000.0, 0.0)); // Remote Host
-    PositionAlloc->Add(Vector(enbX, enbY, 0.0));     // eNB
-    PositionAlloc->Add(Vector(2500.0, 1000.0, 0.0)); // PGW
-    PositionAlloc->Add(Vector(2500, 1500.0, 0.0));   // SGW
+    positionAlloc->Add(Vector(enbX, enbY, 0.0)); // gNB
+    positionAlloc->Add(Vector(enbX, enbY - 30.0, 0.0)); //pgw
+    positionAlloc->Add(Vector(enbX, enbY - 10.0, 0.0)); //sgw
+    positionAlloc->Add(Vector(enbX - 75.0, enbY - 50.0, 0.0)); //remoteHost
+
     nodesMobility.SetMobilityModel("ns3::ConstantPositionMobilityModel");
-    nodesMobility.SetPositionAllocator(PositionAlloc);
-    nodesMobility.Install(remoteHosts);
-    nodesMobility.Install(eNBs);
+    nodesMobility.SetPositionAllocator(positionAlloc);
+    nodesMobility.Install(gnbContainer);
     nodesMobility.Install(pgw);
     nodesMobility.Install(sgw);
-
-    // UEs - Set position allocator for UEs relative to the eNB
+    nodesMobility.Install(remoteHosts);
+    
     uesMobility.SetPositionAllocator("ns3::RandomDiscPositionAllocator",
-                                     "X",
-                                     StringValue("2500.0"),
-                                     "Y",
-                                     StringValue("2500.0"),
-                                     "Rho",
-                                     StringValue("ns3::UniformRandomVariable[Min=" + std::to_string(baseDistance) +"|Max="+ std::to_string(maxDistance) +"]"));
-    uesMobility.SetMobilityModel("ns3::ConstantVelocityMobilityModel");
-    uesMobility.Install(ues);
+                                    "X", DoubleValue(enbX),
+                                    "Y", DoubleValue(enbY),
+                                    "Rho", StringValue("ns3::UniformRandomVariable[Min=150]|[Max=600]"));
 
-    for (int i = 0; i < nUE; i++)
-    {
-        Ptr<CVM> mobility = ues.Get(i)->GetObject<CVM>();
+    uesMobility.SetMobilityModel("ns3::RandomWalk2dMobilityModel",
+                                "Bounds", RectangleValue(Rectangle(0, 750, 0, 750)));
+    uesMobility.Install(uesContainer);
 
-        double newSpeed = uRand->GetValue();
-        double newDirection = uRand->GetValue(0.0, 2 * M_PI);
-
-        double x = newSpeed * cos(newDirection);
-        double y = newSpeed * sin(newDirection);
-
-        mobility->SetVelocity(Vector(x, y, 0.0));
-
-        ScheduleCheckCourse(mobility);
-    }
 }
 
-/**
- * Schedule next course check
- */
 void
-ScheduleCheckCourse(Ptr<MobilityModel> mobility)
+CheckCourse(std::string context, Ptr<MobilityModel> mob)
 {
-    Simulator::Schedule(Seconds(1.0), &CheckCourse, "", mobility);
-}
-
-/**
- * Check if the UE is outside the cell range or closer to the eNB than 2500m.
- * If so, generate a new speed and direction to UE, and schedule a new check.
- */
-void
-CheckCourse(std::string context, Ptr<MobilityModel> mobility)
-{
-    Vector pos = mobility->GetPosition();
-    Vector vel = mobility->GetVelocity();
+    Vector pos = mob->GetPosition();
+    // NS_LOG_DEBUG("UE position: " << pos);
+    Vector vel = mob->GetVelocity();
 
     double ueX = pos.x;
     double ueY = pos.y;
 
-    double distance = std::sqrt(std::pow(ueX - enbX, 2) + std::pow(ueY - enbY, 2));
+    double distance = sqrt(pow(ueX - enbX, 2) + pow(ueY - enbY, 2));
 
-    if (distance > maxDistance || distance < baseDistance)
+    if (distance > radius)
     {
-        // Reflect the velocity components to reverse direction
         vel.x = -vel.x;
         vel.y = -vel.y;
 
-        NS_LOG_INFO("Adjusted UE direction to opposite");
+        NS_LOG_INFO("UE out of course. Changing direction.");
     }
 
-    ScheduleCheckCourse(mobility);
+    Simulator::Schedule(Seconds(1.0), &CheckCourse, "", mob);
 }
 
-void
-createRouteUEsRemoteHost()
+void BuildApps(Ipv4InterfaceContainer& ueIps, uint32_t numUes)
 {
-    Ipv4StaticRoutingHelper ipv4RoutingHelper;
-    Ptr<Ipv4StaticRouting> remoteHostStaticRouting =
-        ipv4RoutingHelper.GetStaticRouting(remoteHost->GetObject<Ipv4>());
-    remoteHostStaticRouting->AddNetworkRouteTo(Ipv4Address("7.0.0.0"), Ipv4Mask("255.0.0.0"), 1);
+    uint16_t dlPortClassic = 1234;
+    uint16_t dlPortL4s = 1235;
 
-    for (uint32_t u = 0; u < ues.GetN(); ++u)
+    // Assign TCP types to remote hosts
+    Config::Set("/NodeList/0/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpCubic::GetTypeId())); // remote host 0
+    Config::Set("/NodeList/1/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpDctcp::GetTypeId())); // remote host 1
+
+    for (uint32_t i = 0; i < numUes; ++i)
     {
-        Ptr<Node> ueNode = ues.Get(u);
-        Ptr<Ipv4StaticRouting> ueStaticRouting =
-            ipv4RoutingHelper.GetStaticRouting(ueNode->GetObject<Ipv4>());
-        ueStaticRouting->SetDefaultRoute(core->GetUeDefaultGatewayAddress(), 1);
+        uint32_t ueGlobalIndex = 2 + i;  // UEs start at node 2 in global list
+
+        // Assign Cubic to UE
+        Config::Set("/NodeList/" + std::to_string(ueGlobalIndex) + "/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpCubic::GetTypeId()));
+
+        Address sinkLocalAddressClassic(InetSocketAddress(Ipv4Address::GetAny(), dlPortClassic + i));
+        PacketSinkHelper dlSinkClassic("ns3::TcpSocketFactory", sinkLocalAddressClassic);
+        ApplicationContainer sinkAppClassic = dlSinkClassic.Install(uesContainer.Get(i));  // Fix: Correct UE indexing
+        sinkAppClassic.Start(Seconds(1.0));
+        sinkAppClassic.Stop(simTime + Seconds(1.0));
+
+        BulkSendHelper classicClient("ns3::TcpSocketFactory", InetSocketAddress(ueIps.GetAddress(i), dlPortClassic + i));
+        classicClient.SetAttribute("MaxBytes", UintegerValue(0));
+        classicClient.SetAttribute("Remote", AddressValue(InetSocketAddress(ueIps.GetAddress(i), dlPortClassic + i)));
+
+        ApplicationContainer clientAppsClassic = classicClient.Install(remoteHosts.Get(0));  // Fix: Use remoteHosts.Get(0)
+        clientAppsClassic.Start(Seconds(2.0));
+        clientAppsClassic.Stop(simTime);
+
+        // Assign DCTCP to UE
+        Config::Set("/NodeList/" + std::to_string(ueGlobalIndex) + "/$ns3::TcpL4Protocol/SocketType", TypeIdValue(TcpDctcp::GetTypeId()));
+
+        Address sinkLocalAddressL4s(InetSocketAddress(Ipv4Address::GetAny(), dlPortL4s + i));
+        PacketSinkHelper dlSinkL4s("ns3::TcpSocketFactory", sinkLocalAddressL4s);
+        ApplicationContainer sinkAppL4s = dlSinkL4s.Install(uesContainer.Get(i));  // Fix: Correct UE indexing
+        sinkAppL4s.Start(Seconds(1.0));
+        sinkAppL4s.Stop(simTime + Seconds(1.0));
+
+        BulkSendHelper l4sClient("ns3::TcpSocketFactory", InetSocketAddress(ueIps.GetAddress(i), dlPortL4s + i));
+        l4sClient.SetAttribute("MaxBytes", UintegerValue(0));
+        l4sClient.SetAttribute("Remote", AddressValue(InetSocketAddress(ueIps.GetAddress(i), dlPortL4s + i)));
+
+        ApplicationContainer clientAppsL4s = l4sClient.Install(remoteHosts.Get(1));  // Fix: Use remoteHosts.Get(1)
+        clientAppsL4s.Start(Seconds(2.0));
+        clientAppsL4s.Stop(simTime);
     }
 }
